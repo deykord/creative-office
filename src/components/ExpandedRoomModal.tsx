@@ -1,0 +1,376 @@
+import React, { useState } from 'react';
+import { Room, User, PresenceStatus, ReactionEvent } from '../types';
+import {
+  X,
+  Mic,
+  MicOff,
+  Camera,
+  CameraOff,
+  Monitor,
+  Hand,
+  Smile,
+  LogOut,
+  ChevronDown,
+  Sparkles,
+  Users,
+  Radio,
+  ArrowUp,
+  HelpCircle,
+  Video,
+} from 'lucide-react';
+
+interface ExpandedRoomModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  room: Room | null;
+  users: User[];
+  presences: Record<string, PresenceStatus>;
+  currentUser: User;
+  currentPresence?: PresenceStatus;
+  activeReactions: ReactionEvent[];
+  onSendReaction: (emoji: string) => void;
+  onUpdateStatus: (updates: Partial<PresenceStatus>) => void;
+  localMediaStream: MediaStream | null;
+  remoteStreams: Record<string, MediaStream>;
+}
+
+export const EMOJI_PRESETS_EXTENDED = [
+  { emoji: '👏', name: 'Clap' },
+  { emoji: '😂', name: 'Laugh' },
+  { emoji: '😈', name: 'Mischief' },
+  { emoji: '🔥', name: 'Fire' },
+  { emoji: '🤣', name: 'ROFL' },
+  { emoji: '👍', name: 'Thumbs Up' },
+  { emoji: '🍿', name: 'Popcorn' },
+  { emoji: '🎉', name: 'Party' },
+  { emoji: '🚀', name: 'Rocket' },
+  { emoji: '😍', name: 'Heart Eyes' },
+  { emoji: '100', name: '100' },
+];
+
+export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
+  isOpen,
+  onClose,
+  room,
+  users,
+  presences,
+  currentUser,
+  currentPresence,
+  activeReactions,
+  onSendReaction,
+  onUpdateStatus,
+  localMediaStream,
+  remoteStreams,
+}) => {
+  const [selectedView, setSelectedView] = useState<'gallery' | 'speaker'>('gallery');
+  const [handRaised, setHandRaised] = useState(false);
+
+  if (!isOpen || !room) return null;
+
+  const isMuted = currentPresence?.isMuted ?? false;
+  const isCameraOn = currentPresence?.isCameraOn ?? false;
+
+  const roomUsers = users.filter((u) => presences[u.id]?.currentRoomId === room.id);
+  // Guarantee at least 4 participants for rich full-screen preview if in room
+  const displayParticipants = roomUsers.length > 0 ? roomUsers : users.slice(0, 4);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#0C0C0E]/95 backdrop-blur-xl flex flex-col justify-between select-none animate-in fade-in duration-200">
+      {/* Top Bar matching Screenshots 2 & 3 */}
+      <header className="h-14 border-b border-[#2D2D30] px-6 flex items-center justify-between bg-[#111113] shrink-0">
+        {/* Left window control dots */}
+        <div className="flex items-center space-x-2 w-32">
+          <span
+            onClick={onClose}
+            className="w-3 h-3 rounded-full bg-[#FF5F56] hover:opacity-80 cursor-pointer transition inline-block"
+            title="Close Room View"
+          ></span>
+          <span className="w-3 h-3 rounded-full bg-[#FFBD2E] inline-block"></span>
+          <span className="w-3 h-3 rounded-full bg-[#27C93F] inline-block"></span>
+        </div>
+
+        {/* Center Room Name & Live Indicator */}
+        <div className="flex flex-col items-center">
+          <div className="flex items-center space-x-2">
+            <h2 className="text-sm md:text-base font-bold text-white tracking-wide">
+              {room.name}
+            </h2>
+            <span className="bg-[#D9A34A]/20 text-[#D9A34A] text-[10px] font-extrabold uppercase px-2 py-0.5 rounded border border-[#D9A34A]/40 flex items-center space-x-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+              <span>{room.type === 'theater' ? 'Theater Live' : 'Recording Magic Minutes'}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Right Gallery Dropdown & Close Button */}
+        <div className="flex items-center space-x-3 w-32 justify-end">
+          <div className="flex items-center space-x-1 bg-[#1A1A1C] border border-[#2D2D30] px-3 py-1 rounded-xl text-xs font-semibold text-zinc-300">
+            <Users className="w-3.5 h-3.5 text-[#D9A34A]" />
+            <span>Gallery</span>
+            <ChevronDown className="w-3 h-3 text-zinc-500" />
+          </div>
+
+          <button
+            onClick={onClose}
+            className="p-1.5 text-zinc-400 hover:text-white hover:bg-[#242427] rounded-xl transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      </header>
+
+      {/* Floating Emojis Reaction Overlay */}
+      <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
+        {activeReactions.map((rx) => (
+          <div
+            key={rx.id}
+            className="absolute animate-float-up text-4xl font-extrabold filter drop-shadow-lg"
+            style={{
+              left: `${15 + Math.random() * 70}%`,
+              bottom: '18%',
+            }}
+          >
+            {rx.emoji}
+          </div>
+        ))}
+      </div>
+
+      {/* Main Room Canvas Body */}
+      <main className="flex-1 p-6 overflow-y-auto flex flex-col justify-center max-w-7xl w-full mx-auto relative">
+        {/* MEETING ROOM VIEW (Screenshot 2) */}
+        {room.type === 'meeting' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full h-full max-h-[700px]">
+            {displayParticipants.slice(0, 4).map((usr, index) => {
+              const isSelf = usr.id === currentUser.id;
+
+              return (
+                <div
+                  key={usr.id}
+                  className="bg-[#1C1C20] border border-[#2D2D30] rounded-3xl overflow-hidden relative shadow-2xl flex items-center justify-center group"
+                >
+                  {/* Photo Video Stream background */}
+                  <img
+                    src={usr.avatarUrl}
+                    alt={usr.name}
+                    className="w-full h-full object-cover filter brightness-95 group-hover:scale-105 transition duration-500"
+                  />
+
+                  {/* Top-right audio activity badge or video effect */}
+                  <div className="absolute top-3 right-3 flex items-center space-x-2">
+                    {index === 1 && (
+                      <div className="bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-amber-500/30 flex items-center space-x-1.5 text-amber-400 text-xs font-bold">
+                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                        <span>Speaking</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Bottom Participant Name Tag */}
+                  <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md border border-[#3A3A40] px-4 py-1.5 rounded-2xl flex items-center space-x-2">
+                    <span className="text-xs font-bold text-white tracking-wide">
+                      {usr.name}
+                    </span>
+                    {isSelf && (
+                      <span className="text-[10px] text-[#D9A34A] font-extrabold uppercase">
+                        (You)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* THEATER MODE VIEW (Screenshot 3) */}
+        {room.type === 'theater' && (
+          <div className="flex flex-col space-y-6 w-full h-full justify-between">
+            {/* Top Stage Presenter Row */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {displayParticipants.slice(0, 3).map((usr) => (
+                <div
+                  key={usr.id}
+                  className="bg-[#1C1C20] border border-[#2D2D30] rounded-3xl overflow-hidden h-56 relative shadow-2xl flex items-center justify-center group"
+                >
+                  <img
+                    src={usr.avatarUrl}
+                    alt={usr.name}
+                    className="w-full h-full object-cover filter brightness-95 group-hover:scale-105 transition duration-500"
+                  />
+                  <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md border border-[#3A3A40] px-4 py-1.5 rounded-2xl">
+                    <span className="text-xs font-bold text-white tracking-wide">
+                      {usr.name}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Stage Action Controls */}
+            <div className="flex items-center space-x-3 px-2">
+              <button className="bg-[#242428] hover:bg-[#2D2D32] border border-[#3A3A40] text-zinc-200 px-4 py-2 rounded-2xl text-xs font-bold flex items-center space-x-2 transition">
+                <ArrowUp className="w-4 h-4 text-[#D9A34A]" />
+                <span>To Backstage</span>
+              </button>
+
+              <button className="bg-[#242428] hover:bg-[#2D2D32] border border-[#3A3A40] text-zinc-200 px-4 py-2 rounded-2xl text-xs font-bold flex items-center space-x-2 transition">
+                <HelpCircle className="w-4 h-4 text-amber-400" />
+                <span>Ask a Question</span>
+                <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+              </button>
+            </div>
+
+            {/* Audience Seating Grid matching Screenshot 3 */}
+            <div className="bg-[#121215] border border-[#2D2D30] rounded-3xl p-5 shadow-xl">
+              <div className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-3">
+                Mainstage Audience Seats
+              </div>
+              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-3">
+                {Array.from({ length: 16 }).map((_, idx) => {
+                  const seedUser1 = users[idx % users.length];
+                  const seedUser2 = users[(idx + 2) % users.length];
+
+                  return (
+                    <div
+                      key={idx}
+                      className="bg-[#1C1C20] border border-[#2D2D30] rounded-2xl p-2.5 flex items-center justify-center space-x-1 hover:border-[#D9A34A] transition cursor-pointer"
+                    >
+                      <img
+                        src={seedUser1.avatarUrl}
+                        alt={seedUser1.name}
+                        className="w-6 h-6 rounded-full object-cover ring-1 ring-zinc-700"
+                      />
+                      {idx % 2 === 0 && (
+                        <img
+                          src={seedUser2.avatarUrl}
+                          alt={seedUser2.name}
+                          className="w-6 h-6 rounded-full object-cover ring-1 ring-zinc-700 -ml-2"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ARCADE GAME ROOM VIEW */}
+        {room.type === 'game' && (
+          <div className="bg-[#1C1C20] border border-[#2D2D30] rounded-3xl p-8 max-w-2xl w-full mx-auto text-center shadow-2xl flex flex-col items-center">
+            <span className="text-4xl mb-3">🎮</span>
+            <h3 className="text-xl font-extrabold text-white mb-2">{room.name}</h3>
+            <p className="text-xs text-zinc-400 mb-6">{room.description}</p>
+            <div className="w-full bg-[#121215] border border-[#2D2D30] rounded-2xl p-4">
+              <h4 className="text-xs font-bold text-[#D9A34A] uppercase tracking-wider mb-3">
+                Top Game Contenders
+              </h4>
+              <div className="flex justify-around items-center">
+                {users.slice(0, 3).map((u, i) => (
+                  <div key={u.id} className="flex flex-col items-center">
+                    <span className="text-xs font-extrabold text-[#D9A34A] mb-1">
+                      #{i + 1}
+                    </span>
+                    <img
+                      src={u.avatarUrl}
+                      alt={u.name}
+                      className="w-14 h-14 rounded-full border-2 border-[#D9A34A] object-cover shadow-lg"
+                    />
+                    <span className="text-xs font-bold text-white mt-2">{u.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Footer Area: Emoji Bar + Control Controls (Matching Screenshots 2 & 3) */}
+      <footer className="bg-[#0C0C0E] border-t border-[#2D2D30] p-4 flex flex-col items-center space-y-4 shrink-0">
+        {/* Horizontal Emoji Reaction Strip with visual frequency meters */}
+        <div className="flex items-center space-x-2 overflow-x-auto max-w-3xl w-full justify-center px-4 py-1">
+          {EMOJI_PRESETS_EXTENDED.map((item) => (
+            <button
+              key={item.name}
+              onClick={() => onSendReaction(item.emoji)}
+              className="bg-[#1C1C20] hover:bg-[#28282E] border border-[#2D2D30] hover:border-[#D9A34A] px-3 py-2 rounded-2xl flex flex-col items-center transition group active:scale-95 shrink-0"
+              title={item.name}
+            >
+              <span className="text-lg group-hover:scale-125 transition-transform duration-150">
+                {item.emoji}
+              </span>
+              {/* Audio / frequency meter lines under emoji */}
+              <div className="flex items-end space-x-0.5 mt-1 h-2">
+                <span className="w-0.5 h-1.5 bg-zinc-600 group-hover:bg-[#D9A34A] rounded-full"></span>
+                <span className="w-0.5 h-2 bg-zinc-500 group-hover:bg-[#D9A34A] rounded-full"></span>
+                <span className="w-0.5 h-1 bg-zinc-600 group-hover:bg-[#D9A34A] rounded-full"></span>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Action Controls Bar */}
+        <div className="flex items-center space-x-3 bg-[#1A1A1C] border border-[#2D2D30] p-2 rounded-2xl shadow-xl">
+          {/* Camera Toggle */}
+          <button
+            onClick={() => onUpdateStatus({ isCameraOn: !isCameraOn })}
+            className={`w-11 h-11 rounded-xl flex items-center justify-center transition border ${
+              !isCameraOn
+                ? 'bg-red-500/20 text-red-400 border-red-500/40'
+                : 'bg-[#242427] text-white border-[#3A3A40] hover:bg-[#2C2C30]'
+            }`}
+            title="Toggle Video"
+          >
+            {!isCameraOn ? <CameraOff className="w-5 h-5" /> : <Camera className="w-5 h-5" />}
+          </button>
+
+          {/* Mic Toggle */}
+          <button
+            onClick={() => onUpdateStatus({ isMuted: !isMuted })}
+            className={`w-11 h-11 rounded-xl flex items-center justify-center transition border ${
+              isMuted
+                ? 'bg-red-500/20 text-red-400 border-red-500/40'
+                : 'bg-[#242427] text-white border-[#3A3A40] hover:bg-[#2C2C30]'
+            }`}
+            title="Toggle Mic"
+          >
+            {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          </button>
+
+          {/* Screen Share */}
+          <button
+            onClick={() => onUpdateStatus({ isSharingScreen: !currentPresence?.isSharingScreen })}
+            className="w-11 h-11 rounded-xl bg-[#242427] hover:bg-[#2C2C30] text-zinc-200 border border-[#3A3A40] flex items-center justify-center transition"
+            title="Share Screen"
+          >
+            <Monitor className="w-5 h-5" />
+          </button>
+
+          {/* Hand Raise */}
+          <button
+            onClick={() => setHandRaised(!handRaised)}
+            className={`w-11 h-11 rounded-xl flex items-center justify-center transition border ${
+              handRaised
+                ? 'bg-[#D9A34A] text-black border-[#D9A34A]'
+                : 'bg-[#242427] text-zinc-200 border-[#3A3A40] hover:bg-[#2C2C30]'
+            }`}
+            title="Raise Hand"
+          >
+            <Hand className="w-5 h-5" />
+          </button>
+
+          <div className="h-6 w-[1px] bg-[#3A3A40] mx-1"></div>
+
+          {/* Leave Room Button */}
+          <button
+            onClick={onClose}
+            className="bg-[#D9A34A] hover:bg-[#F5D193] text-black font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-widest transition flex items-center space-x-1.5 shadow-[0_0_15px_rgba(217,163,74,0.3)]"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Leave Room</span>
+          </button>
+        </div>
+      </footer>
+    </div>
+  );
+};

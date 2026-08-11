@@ -1,0 +1,11 @@
+{
+  "name": "Creativeprocess Office",
+  "description": "Virtual office dashboard with live presence grid, interactive room cards (Meeting, Theater, Game Room), WebRTC audio/video, and real-time team collaboration.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
