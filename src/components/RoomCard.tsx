@@ -88,6 +88,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
               const p = presences[user.id];
               const isLocal = user.id === currentUser.id;
               const hasRemoteStream = remoteStreams[user.id];
+              const shouldShowVideo = Boolean(p?.isCameraOn || p?.isSharingScreen);
 
               return (
                 <div
@@ -95,7 +96,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
                   className="relative bg-zinc-950/90 rounded-xl border border-zinc-800 overflow-hidden aspect-video flex items-center justify-center group"
                 >
                   {/* WebRTC Video Stream element if available */}
-                  {isLocal && localMediaStream ? (
+                  {isLocal && localMediaStream && shouldShowVideo ? (
                     <video
                       ref={(el) => {
                         if (el) el.srcObject = localMediaStream;
@@ -105,7 +106,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
                       muted
                       className="w-full h-full object-cover rounded-xl"
                     />
-                  ) : hasRemoteStream ? (
+                  ) : hasRemoteStream && shouldShowVideo ? (
                     <video
                       ref={(el) => {
                         if (el) el.srcObject = remoteStreams[user.id];

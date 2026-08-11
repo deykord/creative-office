@@ -87,28 +87,6 @@ export const PresenceCard: React.FC<PresenceCardProps> = ({
           </div>
 
           <div className="flex flex-col items-end space-y-1">
-            {/* App Badge Icon matching Screenshot 1 (Spotify, Figma, Linear, Notion, VSCode) */}
-            {user.id === 'usr-2' && (
-              <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.5 rounded-md font-bold flex items-center space-x-1" title="Figma">
-                <span>🎨</span> <span>Figma</span>
-              </span>
-            )}
-            {user.id === 'usr-4' && (
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded-md font-bold flex items-center space-x-1" title="Spotify">
-                <span>🎵</span> <span>Spotify</span>
-              </span>
-            )}
-            {user.id === 'usr-6' && (
-              <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/40 px-1.5 py-0.5 rounded-md font-bold flex items-center space-x-1" title="VSCode">
-                <span>💻</span> <span>VSCode</span>
-              </span>
-            )}
-            {user.id === 'usr-3' && (
-              <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.5 rounded-md font-bold flex items-center space-x-1" title="Linear">
-                <span>🎯</span> <span>Linear</span>
-              </span>
-            )}
-
             {/* Status Pill */}
             <span
               className={`inline-flex items-center space-x-1 border px-2 py-0.5 rounded-full text-[10px] font-medium tracking-wide ${config.badgeClass}`}

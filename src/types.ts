@@ -2,12 +2,15 @@ export type UserStatusType = 'online' | 'in_call' | 'focusing' | 'away' | 'liste
 
 export interface User {
   id: string;
+  username: string;
   name: string;
   email: string;
   role: string;
   avatarUrl: string;
   teamId: string;
   teamName?: string;
+  isAdmin?: boolean;
+  isActive?: boolean;
   createdAt?: string;
 }
 

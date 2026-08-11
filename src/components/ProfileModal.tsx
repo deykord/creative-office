@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { User, PresenceStatus } from '../types';
 import { X, User as UserIcon, Music, Sparkles, Save, Check } from 'lucide-react';
 
@@ -7,7 +7,7 @@ interface ProfileModalProps {
   onClose: () => void;
   currentUser: User;
   currentPresence?: PresenceStatus;
-  onSave: (updates: { customStatus?: string; currentMusic?: string; role?: string }) => void;
+  onSave: (updates: { customStatus?: string; currentMusic?: string; role?: string }) => void | Promise<void>;
 }
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({
@@ -21,17 +21,32 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [currentMusic, setCurrentMusic] = useState(currentPresence?.currentMusic || '');
   const [role, setRole] = useState(currentUser.role || '');
   const [saved, setSaved] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setCustomStatus(currentPresence?.customStatus || '');
+    setCurrentMusic(currentPresence?.currentMusic || '');
+    setRole(currentUser.role || '');
+    setError('');
+  }, [isOpen, currentUser.role, currentPresence?.customStatus, currentPresence?.currentMusic]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ customStatus, currentMusic, role });
-    setSaved(true);
-    setTimeout(() => {
-      setSaved(false);
-      onClose();
-    }, 800);
+    setSubmitting(true);
+    setError('');
+    try {
+      await onSave({ customStatus, currentMusic, role });
+      setSaved(true);
+      setTimeout(() => { setSaved(false); onClose(); }, 600);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Profile update failed.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -97,6 +112,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           </div>
 
           <div className="pt-3 border-t border-zinc-800 flex items-center justify-end space-x-2">
+            {error && <p className="mr-auto text-xs text-red-300">{error}</p>}
             <button
               type="button"
               onClick={onClose}
@@ -106,7 +122,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </button>
             <button
               type="submit"
-              className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold px-5 py-2 rounded-xl text-xs flex items-center space-x-1.5 shadow-lg shadow-amber-500/20"
+              disabled={submitting}
+              className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 text-black font-bold px-5 py-2 rounded-xl text-xs flex items-center space-x-1.5 shadow-lg shadow-amber-500/20"
             >
               {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
               <span>{saved ? 'Saved!' : 'Save Presence'}</span>

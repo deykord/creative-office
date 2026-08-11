@@ -9,6 +9,7 @@ interface BottomToolbarProps {
   onOpenSchemaModal: () => void;
   selectedBackground: string;
   onSelectBackground: (bgUrl: string) => void;
+  canInspectSchema?: boolean;
 }
 
 export const BACKGROUND_PRESETS = [
@@ -51,6 +52,7 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
   onOpenSchemaModal,
   selectedBackground,
   onSelectBackground,
+  canInspectSchema = false,
 }) => {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [bgStripOpen, setBgStripOpen] = useState(false);
@@ -67,7 +69,7 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
     <footer id="bottom-toolbar-container" className="h-20 bg-[#0C0C0E] border-t border-[#2D2D30] px-6 md:px-8 flex items-center justify-between sticky bottom-0 z-40 select-none shrink-0">
       {/* Left: Database Schema Button */}
       <div className="flex items-center space-x-2">
-        <button
+        {canInspectSchema && <button
           id="btn-bottom-schema"
           onClick={onOpenSchemaModal}
           className="flex items-center space-x-2 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-xl border border-zinc-800 text-xs font-medium transition"
@@ -75,7 +77,7 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
         >
           <Database className="w-4 h-4 text-amber-400" />
           <span className="hidden sm:inline">PostgreSQL DDL</span>
-        </button>
+        </button>}
       </div>
 
       {/* Center Controls: Mic, Camera, Reaction, Screen Share */}

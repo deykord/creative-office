@@ -14,8 +14,6 @@ import {
   Sparkles,
   Users,
   Radio,
-  ArrowUp,
-  HelpCircle,
   Video,
 } from 'lucide-react';
 
@@ -32,6 +30,9 @@ interface ExpandedRoomModalProps {
   onUpdateStatus: (updates: Partial<PresenceStatus>) => void;
   localMediaStream: MediaStream | null;
   remoteStreams: Record<string, MediaStream>;
+  mediaError?: string;
+  raisedHands: Record<string, boolean>;
+  onHandRaised: (raised: boolean) => void;
 }
 
 export const EMOJI_PRESETS_EXTENDED = [
@@ -61,9 +62,11 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
   onUpdateStatus,
   localMediaStream,
   remoteStreams,
+  mediaError,
+  raisedHands,
+  onHandRaised,
 }) => {
   const [selectedView, setSelectedView] = useState<'gallery' | 'speaker'>('gallery');
-  const [handRaised, setHandRaised] = useState(false);
 
   if (!isOpen || !room) return null;
 
@@ -71,8 +74,9 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
   const isCameraOn = currentPresence?.isCameraOn ?? false;
 
   const roomUsers = users.filter((u) => presences[u.id]?.currentRoomId === room.id);
-  // Guarantee at least 4 participants for rich full-screen preview if in room
-  const displayParticipants = roomUsers.length > 0 ? roomUsers : users.slice(0, 4);
+  const displayParticipants = roomUsers.some((user) => user.id === currentUser.id)
+    ? roomUsers
+    : [currentUser, ...roomUsers];
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0C0C0E]/95 backdrop-blur-xl flex flex-col justify-between select-none animate-in fade-in duration-200">
@@ -97,18 +101,18 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
             </h2>
             <span className="bg-[#D9A34A]/20 text-[#D9A34A] text-[10px] font-extrabold uppercase px-2 py-0.5 rounded border border-[#D9A34A]/40 flex items-center space-x-1">
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
-              <span>{room.type === 'theater' ? 'Theater Live' : 'Recording Magic Minutes'}</span>
+              <span>{room.type === 'theater' ? 'Theater Live' : 'Room Live'}</span>
             </span>
           </div>
         </div>
 
         {/* Right Gallery Dropdown & Close Button */}
         <div className="flex items-center space-x-3 w-32 justify-end">
-          <div className="flex items-center space-x-1 bg-[#1A1A1C] border border-[#2D2D30] px-3 py-1 rounded-xl text-xs font-semibold text-zinc-300">
+          <button onClick={() => setSelectedView(selectedView === 'gallery' ? 'speaker' : 'gallery')} className="flex items-center space-x-1 bg-[#1A1A1C] border border-[#2D2D30] px-3 py-1 rounded-xl text-xs font-semibold text-zinc-300 hover:border-amber-500/40" title="Switch room layout">
             <Users className="w-3.5 h-3.5 text-[#D9A34A]" />
-            <span>Gallery</span>
+            <span>{selectedView === 'gallery' ? 'Gallery' : 'Speaker'}</span>
             <ChevronDown className="w-3 h-3 text-zinc-500" />
-          </div>
+          </button>
 
           <button
             onClick={onClose}
@@ -137,23 +141,35 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
 
       {/* Main Room Canvas Body */}
       <main className="flex-1 p-6 overflow-y-auto flex flex-col justify-center max-w-7xl w-full mx-auto relative">
+        {mediaError && (
+          <div className="mb-4 bg-red-500/10 border border-red-500/30 text-red-200 rounded-xl px-4 py-3 text-sm">
+            {mediaError} Check the browser site permissions and try again.
+          </div>
+        )}
         {/* MEETING ROOM VIEW (Screenshot 2) */}
         {room.type === 'meeting' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full h-full max-h-[700px]">
-            {displayParticipants.slice(0, 4).map((usr, index) => {
+          <div className={`grid grid-cols-1 ${selectedView === 'gallery' ? 'md:grid-cols-2' : ''} gap-4 w-full h-full max-h-[700px]`}>
+            {displayParticipants.slice(0, selectedView === 'gallery' ? 4 : 1).map((usr, index) => {
               const isSelf = usr.id === currentUser.id;
+              const stream = isSelf ? localMediaStream : remoteStreams[usr.id];
+              const presence = presences[usr.id];
+              const showVideo = Boolean(stream && (presence?.isCameraOn || presence?.isSharingScreen));
 
               return (
                 <div
                   key={usr.id}
                   className="bg-[#1C1C20] border border-[#2D2D30] rounded-3xl overflow-hidden relative shadow-2xl flex items-center justify-center group"
                 >
-                  {/* Photo Video Stream background */}
-                  <img
-                    src={usr.avatarUrl}
-                    alt={usr.name}
-                    className="w-full h-full object-cover filter brightness-95 group-hover:scale-105 transition duration-500"
-                  />
+                  {showVideo ? (
+                    <StreamVideo stream={stream!} muted={isSelf} contain={Boolean(presence?.isSharingScreen)} />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-[#17171B]">
+                      <img src={usr.avatarUrl} alt={usr.name} className="w-28 h-28 rounded-full object-cover ring-4 ring-zinc-800" />
+                    </div>
+                  )}
+
+                  {presence?.isSharingScreen && <span className="absolute top-3 left-3 bg-blue-500/20 border border-blue-400/40 text-blue-200 text-[10px] font-bold uppercase px-2 py-1 rounded-lg">Presenting screen</span>}
+                  {raisedHands[usr.id] && <span className="absolute top-11 left-3 bg-amber-500 text-black text-[10px] font-bold uppercase px-2 py-1 rounded-lg">✋ Hand raised</span>}
 
                   {/* Top-right audio activity badge or video effect */}
                   <div className="absolute top-3 right-3 flex items-center space-x-2">
@@ -192,11 +208,9 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
                   key={usr.id}
                   className="bg-[#1C1C20] border border-[#2D2D30] rounded-3xl overflow-hidden h-56 relative shadow-2xl flex items-center justify-center group"
                 >
-                  <img
-                    src={usr.avatarUrl}
-                    alt={usr.name}
-                    className="w-full h-full object-cover filter brightness-95 group-hover:scale-105 transition duration-500"
-                  />
+                  {(usr.id === currentUser.id ? localMediaStream : remoteStreams[usr.id]) && (presences[usr.id]?.isCameraOn || presences[usr.id]?.isSharingScreen) ? (
+                    <StreamVideo stream={(usr.id === currentUser.id ? localMediaStream : remoteStreams[usr.id])!} muted={usr.id === currentUser.id} contain={Boolean(presences[usr.id]?.isSharingScreen)} />
+                  ) : <img src={usr.avatarUrl} alt={usr.name} className="w-28 h-28 rounded-full object-cover ring-4 ring-zinc-800" />}
                   <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md border border-[#3A3A40] px-4 py-1.5 rounded-2xl">
                     <span className="text-xs font-bold text-white tracking-wide">
                       {usr.name}
@@ -206,47 +220,23 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
               ))}
             </div>
 
-            {/* Stage Action Controls */}
-            <div className="flex items-center space-x-3 px-2">
-              <button className="bg-[#242428] hover:bg-[#2D2D32] border border-[#3A3A40] text-zinc-200 px-4 py-2 rounded-2xl text-xs font-bold flex items-center space-x-2 transition">
-                <ArrowUp className="w-4 h-4 text-[#D9A34A]" />
-                <span>To Backstage</span>
-              </button>
-
-              <button className="bg-[#242428] hover:bg-[#2D2D32] border border-[#3A3A40] text-zinc-200 px-4 py-2 rounded-2xl text-xs font-bold flex items-center space-x-2 transition">
-                <HelpCircle className="w-4 h-4 text-amber-400" />
-                <span>Ask a Question</span>
-                <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
-              </button>
-            </div>
-
             {/* Audience Seating Grid matching Screenshot 3 */}
             <div className="bg-[#121215] border border-[#2D2D30] rounded-3xl p-5 shadow-xl">
               <div className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-3">
                 Mainstage Audience Seats
               </div>
               <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-3">
-                {Array.from({ length: 16 }).map((_, idx) => {
-                  const seedUser1 = users[idx % users.length];
-                  const seedUser2 = users[(idx + 2) % users.length];
-
+                {displayParticipants.map((participant) => {
                   return (
                     <div
-                      key={idx}
+                      key={participant.id}
                       className="bg-[#1C1C20] border border-[#2D2D30] rounded-2xl p-2.5 flex items-center justify-center space-x-1 hover:border-[#D9A34A] transition cursor-pointer"
                     >
                       <img
-                        src={seedUser1.avatarUrl}
-                        alt={seedUser1.name}
+                        src={participant.avatarUrl}
+                        alt={participant.name}
                         className="w-6 h-6 rounded-full object-cover ring-1 ring-zinc-700"
                       />
-                      {idx % 2 === 0 && (
-                        <img
-                          src={seedUser2.avatarUrl}
-                          alt={seedUser2.name}
-                          className="w-6 h-6 rounded-full object-cover ring-1 ring-zinc-700 -ml-2"
-                        />
-                      )}
                     </div>
                   );
                 })}
@@ -263,14 +253,11 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
             <p className="text-xs text-zinc-400 mb-6">{room.description}</p>
             <div className="w-full bg-[#121215] border border-[#2D2D30] rounded-2xl p-4">
               <h4 className="text-xs font-bold text-[#D9A34A] uppercase tracking-wider mb-3">
-                Top Game Contenders
+                People in this lounge
               </h4>
               <div className="flex justify-around items-center">
-                {users.slice(0, 3).map((u, i) => (
+                {displayParticipants.map((u) => (
                   <div key={u.id} className="flex flex-col items-center">
-                    <span className="text-xs font-extrabold text-[#D9A34A] mb-1">
-                      #{i + 1}
-                    </span>
                     <img
                       src={u.avatarUrl}
                       alt={u.name}
@@ -279,6 +266,7 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
                     <span className="text-xs font-bold text-white mt-2">{u.name}</span>
                   </div>
                 ))}
+                {!displayParticipants.length && <p className="text-xs text-zinc-500 py-4">The lounge is empty.</p>}
               </div>
             </div>
           </div>
@@ -311,8 +299,8 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
 
         {/* Action Controls Bar */}
         <div className="flex items-center space-x-3 bg-[#1A1A1C] border border-[#2D2D30] p-2 rounded-2xl shadow-xl">
-          {/* Camera Toggle */}
-          <button
+          {/* Media controls are only applicable to WebRTC rooms. */}
+          {room.type !== 'game' && <><button
             onClick={() => onUpdateStatus({ isCameraOn: !isCameraOn })}
             className={`w-11 h-11 rounded-xl flex items-center justify-center transition border ${
               !isCameraOn
@@ -340,17 +328,17 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
           {/* Screen Share */}
           <button
             onClick={() => onUpdateStatus({ isSharingScreen: !currentPresence?.isSharingScreen })}
-            className="w-11 h-11 rounded-xl bg-[#242427] hover:bg-[#2C2C30] text-zinc-200 border border-[#3A3A40] flex items-center justify-center transition"
-            title="Share Screen"
+            className={`w-11 h-11 rounded-xl flex items-center justify-center transition border ${currentPresence?.isSharingScreen ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' : 'bg-[#242427] hover:bg-[#2C2C30] text-zinc-200 border-[#3A3A40]'}`}
+            title={currentPresence?.isSharingScreen ? 'Stop presenting' : 'Present your screen'}
           >
             <Monitor className="w-5 h-5" />
-          </button>
+          </button></>}
 
           {/* Hand Raise */}
           <button
-            onClick={() => setHandRaised(!handRaised)}
+            onClick={() => onHandRaised(!raisedHands[currentUser.id])}
             className={`w-11 h-11 rounded-xl flex items-center justify-center transition border ${
-              handRaised
+              raisedHands[currentUser.id]
                 ? 'bg-[#D9A34A] text-black border-[#D9A34A]'
                 : 'bg-[#242427] text-zinc-200 border-[#3A3A40] hover:bg-[#2C2C30]'
             }`}
@@ -374,3 +362,15 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
     </div>
   );
 };
+
+const StreamVideo: React.FC<{ stream: MediaStream; muted: boolean; contain?: boolean }> = ({ stream, muted, contain }) => (
+  <video
+    ref={(element) => {
+      if (element && element.srcObject !== stream) element.srcObject = stream;
+    }}
+    autoPlay
+    playsInline
+    muted={muted}
+    className={`w-full h-full bg-black ${contain ? 'object-contain' : 'object-cover'}`}
+  />
+);

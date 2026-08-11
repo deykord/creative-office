@@ -20,7 +20,7 @@ export const DatabaseSchemaModal: React.FC<DatabaseSchemaModalProps> = ({
   presences,
 }) => {
   const [activeTab, setActiveTab] = useState<'ddl' | 'users' | 'teams' | 'rooms' | 'presences'>('ddl');
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [sqlContent, setSqlContent] = useState<string>('');
 
   useEffect(() => {
@@ -34,10 +34,14 @@ export const DatabaseSchemaModal: React.FC<DatabaseSchemaModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(sqlContent);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(sqlContent);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('failed');
+    }
+    setTimeout(() => setCopyStatus('idle'), 2000);
   };
 
   return (
@@ -134,8 +138,8 @@ export const DatabaseSchemaModal: React.FC<DatabaseSchemaModalProps> = ({
                 onClick={handleCopy}
                 className="absolute top-2 right-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-lg text-xs flex items-center space-x-1 border border-zinc-700 transition"
               >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copied ? 'Copied DDL' : 'Copy SQL'}</span>
+                {copyStatus === 'copied' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copyStatus === 'copied' ? 'Copied DDL' : copyStatus === 'failed' ? 'Copy failed' : 'Copy SQL'}</span>
               </button>
               <pre className="p-4 bg-zinc-950 rounded-xl border border-zinc-800 text-amber-300 overflow-x-auto font-mono leading-relaxed">
                 {sqlContent}
