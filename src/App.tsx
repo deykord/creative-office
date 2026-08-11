@@ -20,6 +20,7 @@ import { ExpandedRoomModal } from './components/ExpandedRoomModal';
 import { DatabaseSchemaModal } from './components/DatabaseSchemaModal';
 import { ProfileModal } from './components/ProfileModal';
 import { INITIAL_USERS, INITIAL_TEAMS, INITIAL_ROOMS, INITIAL_PRESENCES, INITIAL_LEADERBOARD } from './data/mockTeam';
+import { playKnockSound, playStatusChangeSound } from './lib/audio';
 import { Sparkles, Users, Video, Radio, Building2 } from 'lucide-react';
 
 export default function App() {
@@ -65,7 +66,13 @@ export default function App() {
 
     socket.on('presence:updated', (p: PresenceStatus) => {
       if (p && p.userId) {
-        setPresences((prev) => ({ ...prev, [p.userId]: p }));
+        setPresences((prev) => {
+          const prevStatus = prev[p.userId]?.status;
+          if (p.userId !== currentUser.id && prevStatus && prevStatus !== p.status) {
+            playStatusChangeSound();
+          }
+          return { ...prev, [p.userId]: p };
+        });
       }
     });
 
@@ -77,6 +84,7 @@ export default function App() {
 
     socket.on('knock:received', (knock: KnockEvent) => {
       setIncomingKnock(knock);
+      playKnockSound();
     });
 
     socket.on('reaction:broadcast', (reaction: ReactionEvent) => {

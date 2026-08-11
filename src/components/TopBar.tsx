@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, PresenceStatus, UserStatusType } from '../types';
-import { Building2, Database, ShieldCheck, ChevronDown, Music, Mic, MicOff, Camera, Radio } from 'lucide-react';
+import { Building2, Database, ShieldCheck, ChevronDown, Music, Mic, MicOff, Camera, Radio, Volume2, VolumeX, Bell } from 'lucide-react';
+import { getSoundMuted, setSoundMuted, playKnockSound, playStatusChangeSound } from '../lib/audio';
 
 interface TopBarProps {
   currentUser: User;
@@ -33,6 +34,14 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
   const [userSwitchDropdownOpen, setUserSwitchDropdownOpen] = useState(false);
+  const [isMuted, setIsMuted] = useState(getSoundMuted());
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false);
+
+  const toggleAudioMute = () => {
+    const nextState = !isMuted;
+    setIsMuted(nextState);
+    setSoundMuted(nextState);
+  };
 
   const totalOnline = (Object.values(allPresences) as PresenceStatus[]).filter((p) => p.status !== 'offline').length;
   const inRoomsCount = (Object.values(allPresences) as PresenceStatus[]).filter((p) => Boolean(p.currentRoomId)).length;
@@ -65,8 +74,67 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* Right Section: DB Schema, Status Dropdown, User Profile */}
+      {/* Right Section: Audio Notifications, DB Schema, Status Dropdown, User Profile */}
       <div className="flex items-center space-x-3">
+        {/* Audio Notifications Controls */}
+        <div className="relative">
+          <button
+            id="btn-audio-notifications"
+            onClick={() => setAudioMenuOpen(!audioMenuOpen)}
+            className={`p-2 rounded-lg border text-xs font-medium transition-all ${
+              isMuted
+                ? 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                : 'bg-zinc-900 border-amber-500/40 text-amber-400 hover:bg-amber-500/10'
+            }`}
+            title="Audio Notifications Settings"
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+
+          {audioMenuOpen && (
+            <div className="absolute right-0 mt-2 w-56 bg-[#141418] border border-zinc-800 rounded-xl shadow-2xl p-3 z-50 animate-in fade-in zoom-in-95 duration-100">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-800 mb-2">
+                <span className="text-xs font-bold text-white flex items-center space-x-1.5">
+                  <Bell className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Audio Alerts</span>
+                </span>
+                <button
+                  onClick={toggleAudioMute}
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider transition ${
+                    isMuted ? 'bg-zinc-800 text-zinc-400' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  }`}
+                >
+                  {isMuted ? 'Muted' : 'Active'}
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                <button
+                  onClick={() => {
+                    if (isMuted) toggleAudioMute();
+                    playStatusChangeSound();
+                  }}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800/80 rounded-lg transition"
+                >
+                  <span>Test Status Chime</span>
+                  <span className="text-[10px] text-amber-400 font-mono">🔊 Play</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (isMuted) toggleAudioMute();
+                    playKnockSound();
+                  }}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800/80 rounded-lg transition"
+                >
+                  <span>Test Knock Alert</span>
+                  <span className="text-[10px] text-amber-400 font-mono">🔊 Play</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* PostgreSQL Schema Modal Button */}
         <button
           id="btn-open-schema-modal"
