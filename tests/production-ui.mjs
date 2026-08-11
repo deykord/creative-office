@@ -27,13 +27,16 @@ async function login(page, username, password) {
   await page.getByText('Creativeprocess Office', { exact: true }).waitFor();
 }
 
+const browserArgs = [
+  '--use-fake-device-for-media-stream',
+  '--use-fake-ui-for-media-stream',
+  '--auto-select-desktop-capture-source=Entire screen',
+];
+if (process.env.FAKE_AUDIO_FILE) browserArgs.push(`--use-file-for-fake-audio-capture=${process.env.FAKE_AUDIO_FILE}`);
+
 const browser = await chromium.launch({
   headless: true,
-  args: [
-    '--use-fake-device-for-media-stream',
-    '--use-fake-ui-for-media-stream',
-    '--auto-select-desktop-capture-source=Entire screen',
-  ],
+  args: browserArgs,
 });
 
 const context = await browser.newContext();
@@ -177,14 +180,15 @@ try {
     }));
     await page.waitForFunction(() => document.querySelector('video')?.srcObject?.getVideoTracks().length === 1);
     assert((await trackCounts()).video === 1, 'Camera track did not start');
+    if (process.env.FAKE_AUDIO_FILE) await page.locator('[data-speaking="true"]').last().waitFor({ timeout: 5000 });
     await page.getByTitle('Toggle Video').click();
     await page.waitForFunction(() => !document.querySelector('video') || document.querySelector('video').srcObject?.getVideoTracks().length === 0);
     await page.getByTitle('Toggle Video').click();
     await page.waitForFunction(() => document.querySelector('video')?.srcObject?.getVideoTracks().length === 1);
     await page.getByTitle('Toggle Mic').click();
-    await page.waitForTimeout(250);
+    if (process.env.FAKE_AUDIO_FILE) await page.locator('[data-speaking="true"]').last().waitFor({ state: 'detached', timeout: 5000 });
     await page.getByTitle('Toggle Mic').click();
-    await page.waitForTimeout(250);
+    if (process.env.FAKE_AUDIO_FILE) await page.locator('[data-speaking="true"]').last().waitFor({ timeout: 5000 });
   });
 
   await step('Meeting reaction, hand, layout, screen presentation, and leave', async () => {

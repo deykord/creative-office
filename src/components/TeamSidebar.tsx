@@ -6,6 +6,7 @@ interface TeamSidebarProps {
   teams: Team[];
   users: User[];
   presences: Record<string, PresenceStatus>;
+  speakingUsers: Record<string, boolean>;
   selectedTeamId: string | null;
   onSelectTeam: (teamId: string | null) => void;
   searchQuery: string;
@@ -13,7 +14,7 @@ interface TeamSidebarProps {
 }
 
 export const TeamSidebar: React.FC<TeamSidebarProps> = ({
-  teams, users, presences, selectedTeamId, onSelectTeam, searchQuery, onSearchChange,
+  teams, users, presences, speakingUsers, selectedTeamId, onSelectTeam, searchQuery, onSearchChange,
 }) => {
   const [collapsed, setCollapsed] = useState(false);
   if (collapsed) {
@@ -42,8 +43,8 @@ export const TeamSidebar: React.FC<TeamSidebarProps> = ({
       </div>
       <div className="border-t border-zinc-800 pt-4 space-y-2">
         {users.slice(0, 12).map((user) => (
-          <div key={user.id} className="flex items-center gap-2.5">
-            <div className="relative"><img src={user.avatarUrl} alt="" className="w-7 h-7 rounded-full" /><span className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border border-[#111113] ${presences[user.id]?.status === 'offline' ? 'bg-zinc-600' : 'bg-emerald-500'}`} /></div>
+          <div key={user.id} className={`flex items-center gap-2.5 rounded-lg transition px-1 py-0.5 ${speakingUsers[user.id] ? 'bg-amber-500/10 text-amber-200' : ''}`}>
+            <div className="relative"><img src={user.avatarUrl} alt="" className={`w-7 h-7 rounded-full transition ${speakingUsers[user.id] ? 'ring-2 ring-amber-400' : ''}`} /><span className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border border-[#111113] ${presences[user.id]?.status === 'offline' ? 'bg-zinc-600' : 'bg-emerald-500'}`} /></div>
             <div className="min-w-0"><p className="text-xs text-zinc-200 truncate">{user.name}</p><p className="text-[10px] text-zinc-600 truncate">{user.role}</p></div>
           </div>
         ))}

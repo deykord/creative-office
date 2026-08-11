@@ -32,6 +32,7 @@ interface ExpandedRoomModalProps {
   remoteStreams: Record<string, MediaStream>;
   mediaError?: string;
   raisedHands: Record<string, boolean>;
+  speakingUsers: Record<string, boolean>;
   onHandRaised: (raised: boolean) => void;
 }
 
@@ -64,6 +65,7 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
   remoteStreams,
   mediaError,
   raisedHands,
+  speakingUsers,
   onHandRaised,
 }) => {
   const [selectedView, setSelectedView] = useState<'gallery' | 'speaker'>('gallery');
@@ -77,6 +79,9 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
   const displayParticipants = roomUsers.some((user) => user.id === currentUser.id)
     ? roomUsers
     : [currentUser, ...roomUsers];
+  const orderedParticipants = selectedView === 'speaker'
+    ? [...displayParticipants].sort((left, right) => Number(Boolean(speakingUsers[right.id])) - Number(Boolean(speakingUsers[left.id])))
+    : displayParticipants;
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0C0C0E]/95 backdrop-blur-xl flex flex-col justify-between select-none animate-in fade-in duration-200">
@@ -149,7 +154,7 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
         {/* MEETING ROOM VIEW (Screenshot 2) */}
         {room.type === 'meeting' && (
           <div className={`grid grid-cols-1 ${selectedView === 'gallery' ? 'md:grid-cols-2' : ''} gap-4 w-full h-full max-h-[700px]`}>
-            {displayParticipants.slice(0, selectedView === 'gallery' ? 4 : 1).map((usr, index) => {
+            {orderedParticipants.slice(0, selectedView === 'gallery' ? 4 : 1).map((usr) => {
               const isSelf = usr.id === currentUser.id;
               const stream = isSelf ? localMediaStream : remoteStreams[usr.id];
               const presence = presences[usr.id];
@@ -158,7 +163,8 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
               return (
                 <div
                   key={usr.id}
-                  className="bg-[#1C1C20] border border-[#2D2D30] rounded-3xl overflow-hidden relative shadow-2xl flex items-center justify-center group"
+                  className={`bg-[#1C1C20] border rounded-3xl overflow-hidden relative shadow-2xl flex items-center justify-center group transition-all duration-150 ${speakingUsers[usr.id] ? 'border-amber-400 ring-4 ring-amber-400/60 shadow-[0_0_38px_rgba(217,163,74,0.3)]' : 'border-[#2D2D30]'}`}
+                  data-speaking={speakingUsers[usr.id] ? 'true' : 'false'}
                 >
                   {showVideo ? (
                     <StreamVideo stream={stream!} muted={isSelf} contain={Boolean(presence?.isSharingScreen)} />
@@ -173,7 +179,7 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
 
                   {/* Top-right audio activity badge or video effect */}
                   <div className="absolute top-3 right-3 flex items-center space-x-2">
-                    {index === 1 && (
+                    {speakingUsers[usr.id] && (
                       <div className="bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-amber-500/30 flex items-center space-x-1.5 text-amber-400 text-xs font-bold">
                         <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
                         <span>Speaking</span>
@@ -206,11 +212,13 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
               {displayParticipants.slice(0, 3).map((usr) => (
                 <div
                   key={usr.id}
-                  className="bg-[#1C1C20] border border-[#2D2D30] rounded-3xl overflow-hidden h-56 relative shadow-2xl flex items-center justify-center group"
+                  className={`bg-[#1C1C20] border rounded-3xl overflow-hidden h-56 relative shadow-2xl flex items-center justify-center group transition-all duration-150 ${speakingUsers[usr.id] ? 'border-amber-400 ring-4 ring-amber-400/60 shadow-[0_0_38px_rgba(217,163,74,0.3)]' : 'border-[#2D2D30]'}`}
+                  data-speaking={speakingUsers[usr.id] ? 'true' : 'false'}
                 >
                   {(usr.id === currentUser.id ? localMediaStream : remoteStreams[usr.id]) && (presences[usr.id]?.isCameraOn || presences[usr.id]?.isSharingScreen) ? (
                     <StreamVideo stream={(usr.id === currentUser.id ? localMediaStream : remoteStreams[usr.id])!} muted={usr.id === currentUser.id} contain={Boolean(presences[usr.id]?.isSharingScreen)} />
                   ) : <img src={usr.avatarUrl} alt={usr.name} className="w-28 h-28 rounded-full object-cover ring-4 ring-zinc-800" />}
+                  {speakingUsers[usr.id] && <span className="absolute top-3 right-3 bg-black/70 border border-amber-400/50 text-amber-300 text-[10px] font-bold uppercase px-2.5 py-1 rounded-full"><span className="inline-block w-1.5 h-1.5 mr-1.5 rounded-full bg-amber-400 animate-pulse" />Speaking</span>}
                   <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md border border-[#3A3A40] px-4 py-1.5 rounded-2xl">
                     <span className="text-xs font-bold text-white tracking-wide">
                       {usr.name}

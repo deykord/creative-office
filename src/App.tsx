@@ -14,6 +14,7 @@ import { LoginPage } from './components/LoginPage';
 import { UserManagementModal } from './components/UserManagementModal';
 import { playKnockSound, playStatusChangeSound } from './lib/audio';
 import { Building2, DoorOpen, Users } from 'lucide-react';
+import { useVoiceActivity } from './hooks/useVoiceActivity';
 
 export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
@@ -102,6 +103,13 @@ export default function App() {
       socket.off('knock:responded', onKnockResponded);
     };
   }, [currentUser?.id]);
+
+  const speakingUsers = useVoiceActivity({
+    enabled: Boolean(expandedRoom && expandedRoom.type !== 'game'),
+    localUserId: currentUser?.id,
+    localStream: localMediaStream,
+    remoteStreams,
+  });
 
   if (authLoading) {
     return <div className="min-h-screen bg-[#0C0C0E] flex items-center justify-center"><div className="w-8 h-8 rounded-full border-2 border-zinc-800 border-t-[#D9A34A] animate-spin" /></div>;
@@ -261,20 +269,20 @@ export default function App() {
             <div className="flex items-center justify-between mb-4"><div><p className="text-[10px] text-[#D9A34A] uppercase tracking-[.2em] font-bold">Workspace</p><h2 className="text-xl font-semibold mt-1">Rooms</h2></div><DoorOpen className="w-5 h-5 text-zinc-700" /></div>
             {rooms.length ? <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">{rooms.map((room) => {
               const occupants = (roomOccupancyMap[room.id] || []).map((id) => users.find((user) => user.id === id)).filter(Boolean) as User[];
-              return <RoomCard key={room.id} room={room} occupants={occupants} presences={presences} currentUser={currentUser} isCurrentUserInRoom={currentPresence?.currentRoomId === room.id} activeReactions={activeReactions} leaderboard={leaderboard} onJoinRoom={joinRoom} onLeaveRoom={leaveRoom} onSendReaction={(emoji) => sendReaction(emoji, room.id)} localMediaStream={localMediaStream} remoteStreams={remoteStreams} />;
+              return <RoomCard key={room.id} room={room} occupants={occupants} presences={presences} currentUser={currentUser} isCurrentUserInRoom={currentPresence?.currentRoomId === room.id} activeReactions={activeReactions} leaderboard={leaderboard} onJoinRoom={joinRoom} onLeaveRoom={leaveRoom} onSendReaction={(emoji) => sendReaction(emoji, room.id)} localMediaStream={localMediaStream} remoteStreams={remoteStreams} speakingUsers={speakingUsers} />;
             })}</div> : <div className="border border-dashed border-zinc-800 rounded-2xl p-8 text-center bg-[#121215]"><Building2 className="w-7 h-7 text-zinc-700 mx-auto mb-3" /><p className="text-sm text-zinc-300">No rooms have been created yet.</p><p className="text-xs text-zinc-600 mt-1">Your workspace starts clean, without seeded demo data.</p></div>}
           </section>
 
           <section>
             <div className="flex items-end justify-between mb-4"><div><p className="text-[10px] text-[#D9A34A] uppercase tracking-[.2em] font-bold">Presence</p><h2 className="text-xl font-semibold mt-1">People</h2></div><span className="text-xs text-zinc-600">{filteredUsers.length} member{filteredUsers.length === 1 ? '' : 's'}</span></div>
-            {filteredUsers.length ? <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">{filteredUsers.map((user) => <PresenceCard key={user.id} user={user} presence={presences[user.id]} currentRoom={rooms.find((room) => room.id === presences[user.id]?.currentRoomId)} isCurrentUser={user.id === currentUser.id} onKnock={(targetId) => { const target = users.find((item) => item.id === targetId); if (target) { setOutgoingKnockUser(target); sendKnockSocket(currentUser.id, targetId, 'Want to have a quick chat?'); } }} onQuickReaction={(_targetId, emoji) => sendReaction(emoji)} />)}</div> : <div className="border border-dashed border-zinc-800 rounded-2xl p-8 text-center"><Users className="w-7 h-7 text-zinc-700 mx-auto mb-3" /><p className="text-sm text-zinc-400">No people match this view.</p></div>}
+            {filteredUsers.length ? <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">{filteredUsers.map((user) => <PresenceCard key={user.id} user={user} presence={presences[user.id]} currentRoom={rooms.find((room) => room.id === presences[user.id]?.currentRoomId)} isCurrentUser={user.id === currentUser.id} isHighlighted={Boolean(speakingUsers[user.id])} onKnock={(targetId) => { const target = users.find((item) => item.id === targetId); if (target) { setOutgoingKnockUser(target); sendKnockSocket(currentUser.id, targetId, 'Want to have a quick chat?'); } }} onQuickReaction={(_targetId, emoji) => sendReaction(emoji)} />)}</div> : <div className="border border-dashed border-zinc-800 rounded-2xl p-8 text-center"><Users className="w-7 h-7 text-zinc-700 mx-auto mb-3" /><p className="text-sm text-zinc-400">No people match this view.</p></div>}
           </section>
         </main>
-        <TeamSidebar teams={teams} users={users} presences={presences} selectedTeamId={selectedTeamId} onSelectTeam={setSelectedTeamId} searchQuery={searchQuery} onSearchChange={setSearchQuery} />
+        <TeamSidebar teams={teams} users={users} presences={presences} speakingUsers={speakingUsers} selectedTeamId={selectedTeamId} onSelectTeam={setSelectedTeamId} searchQuery={searchQuery} onSearchChange={setSearchQuery} />
       </div>
 
       <BottomToolbar currentPresence={currentPresence} onUpdateStatus={updateStatus} onSendGlobalReaction={(emoji) => sendReaction(emoji)} onOpenSchemaModal={() => setIsSchemaModalOpen(true)} selectedBackground={selectedBackground} onSelectBackground={setSelectedBackground} canInspectSchema={Boolean(currentUser.isAdmin)} />
-      <ExpandedRoomModal isOpen={!!expandedRoom} onClose={leaveRoom} room={expandedRoom} users={users} presences={presences} currentUser={currentUser} currentPresence={currentPresence} activeReactions={activeReactions} onSendReaction={(emoji) => sendReaction(emoji, expandedRoom?.id)} onUpdateStatus={updateStatus} localMediaStream={localMediaStream} remoteStreams={remoteStreams} mediaError={mediaError} raisedHands={raisedHands} onHandRaised={(raised) => { setRaisedHands((previous) => ({ ...previous, [currentUser.id]: raised })); setHandRaisedSocket(raised); }} />
+      <ExpandedRoomModal isOpen={!!expandedRoom} onClose={leaveRoom} room={expandedRoom} users={users} presences={presences} currentUser={currentUser} currentPresence={currentPresence} activeReactions={activeReactions} onSendReaction={(emoji) => sendReaction(emoji, expandedRoom?.id)} onUpdateStatus={updateStatus} localMediaStream={localMediaStream} remoteStreams={remoteStreams} mediaError={mediaError} raisedHands={raisedHands} speakingUsers={speakingUsers} onHandRaised={(raised) => { setRaisedHands((previous) => ({ ...previous, [currentUser.id]: raised })); setHandRaisedSocket(raised); }} />
       <KnockModal knock={incomingKnock} outgoingTargetUser={outgoingKnockUser} onAccept={() => { const meetingRoom = rooms.find((room) => room.type === 'meeting'); if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, true); if (meetingRoom) joinRoom(meetingRoom.id); setIncomingKnock(null); }} onDecline={() => { if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, false); setIncomingKnock(null); }} onCancelOutgoing={() => setOutgoingKnockUser(null)} />
       {currentUser.isAdmin && <DatabaseSchemaModal isOpen={isSchemaModalOpen} onClose={() => setIsSchemaModalOpen(false)} users={users} teams={teams} rooms={rooms} presences={presences} />}
       <ProfileModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} currentUser={currentUser} currentPresence={currentPresence} onSave={saveProfile} />

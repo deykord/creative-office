@@ -15,6 +15,7 @@ interface RoomCardProps {
   onSendReaction?: (emoji: string) => void;
   localMediaStream?: MediaStream | null;
   remoteStreams?: Record<string, MediaStream>;
+  speakingUsers?: Record<string, boolean>;
 }
 
 export const RoomCard: React.FC<RoomCardProps> = ({
@@ -30,6 +31,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
   onSendReaction,
   localMediaStream,
   remoteStreams = {},
+  speakingUsers = {},
 }) => {
   // Filter reactions for this room
   const roomReactions = activeReactions.filter((r) => r.roomId === room.id || !r.roomId);
@@ -93,7 +95,8 @@ export const RoomCard: React.FC<RoomCardProps> = ({
               return (
                 <div
                   key={user.id}
-                  className="relative bg-zinc-950/90 rounded-xl border border-zinc-800 overflow-hidden aspect-video flex items-center justify-center group"
+                  className={`relative bg-zinc-950/90 rounded-xl border overflow-hidden aspect-video flex items-center justify-center group transition-all duration-150 ${speakingUsers[user.id] ? 'border-amber-400 ring-2 ring-amber-400/60 shadow-[0_0_24px_rgba(217,163,74,0.28)]' : 'border-zinc-800'}`}
+                  data-speaking={speakingUsers[user.id] ? 'true' : 'false'}
                 >
                   {/* WebRTC Video Stream element if available */}
                   {isLocal && localMediaStream && shouldShowVideo ? (
@@ -129,6 +132,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
                   )}
 
                   {/* Overlays */}
+                  {speakingUsers[user.id] && <span className="absolute top-1.5 right-1.5 bg-amber-400 text-black text-[9px] font-bold uppercase px-2 py-0.5 rounded-full shadow">Speaking</span>}
                   <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] text-white">
                     <span className="truncate max-w-[80px] font-medium">{user.name.split(' ')[0]}</span>
                     <div className="flex items-center space-x-1">
@@ -235,7 +239,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
           </div>
 
           {/* Stage Area */}
-          <div className="bg-zinc-950/90 border border-purple-500/20 rounded-xl p-4 my-3 text-center relative overflow-hidden">
+          <div className={`bg-zinc-950/90 border rounded-xl p-4 my-3 text-center relative overflow-hidden transition-all duration-150 ${speakerUser && speakingUsers[speakerUser.id] ? 'border-amber-400 ring-2 ring-amber-400/50 shadow-[0_0_24px_rgba(217,163,74,0.25)]' : 'border-purple-500/20'}`} data-speaking={speakerUser && speakingUsers[speakerUser.id] ? 'true' : 'false'}>
             <div className="absolute top-2 left-3 text-[10px] font-bold text-purple-400 uppercase tracking-widest">
               🎭 Presenter Stage
             </div>
@@ -254,6 +258,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
                 </div>
                 <h4 className="text-sm font-bold text-white">{speakerUser.name}</h4>
                 <p className="text-xs text-purple-300 font-medium">{room.currentTopic || 'Keynote Presentation'}</p>
+                {speakingUsers[speakerUser.id] && <span className="mt-2 bg-amber-400 text-black text-[9px] font-bold uppercase px-2 py-0.5 rounded-full">Speaking</span>}
               </div>
             ) : (
               <div className="py-6 text-zinc-500 text-xs italic">
@@ -284,7 +289,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
 
             <div className="flex flex-wrap gap-2 items-center min-h-12">
               {occupants.map((u) => (
-                <div key={u.id} className="group relative">
+                <div key={u.id} className={`group relative rounded-full transition ${speakingUsers[u.id] ? 'ring-2 ring-amber-400 ring-offset-2 ring-offset-zinc-900' : ''}`} data-speaking={speakingUsers[u.id] ? 'true' : 'false'}>
                   <img
                     src={u.avatarUrl}
                     alt={u.name}
