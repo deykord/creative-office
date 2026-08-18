@@ -52,11 +52,16 @@ function safeUser(user: User): User {
     email: user.email,
     role: user.role,
     avatarUrl: user.avatarUrl,
+    gender: user.gender,
+    bio: user.bio,
     teamId: user.teamId,
     teamName: user.teamName,
     isAdmin: user.isAdmin,
     isActive: user.isActive,
     createdAt: user.createdAt,
+    officeIntroSeen: user.officeIntroSeen,
+    personalRoomId: user.personalRoomId,
+    defaultFloorId: user.defaultFloorId,
   };
 }
 
@@ -130,7 +135,7 @@ async function startServer() {
   const port = Number(process.env.PORT || 3000);
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '12mb' }));
 
   app.use((req, res, next) => {
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
@@ -145,7 +150,10 @@ async function startServer() {
   });
 
   const server = http.createServer(app);
-  const io = new SocketIOServer(server, { maxHttpBufferSize: 1_000_000 });
+  const io = new SocketIOServer(server, { maxHttpBufferSize: 6_000_000 });
+  const emitChat = async (conversationId: string, event: string, payload: unknown) => {
+    for (const memberId of await db.getConversationMemberIds(conversationId)) io.to(`chat:user:${memberId}`).emit(event, payload);
+  };
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', name: 'Creativeprocess Office Backend' });
@@ -186,12 +194,22 @@ async function startServer() {
   app.patch('/api/me', asyncRoute(async (req, res) => {
     const name = req.body?.name === undefined ? undefined : String(req.body.name).trim();
     const role = req.body?.role === undefined ? undefined : String(req.body.role).trim();
-    if ((name !== undefined && (name.length < 2 || name.length > 120)) || (role !== undefined && role.length > 120)) {
+    const bio = req.body?.bio === undefined ? undefined : String(req.body.bio).trim();
+    const gender = req.body?.gender === undefined ? undefined : String(req.body.gender) as 'male' | 'female';
+    const avatarUrl = req.body?.avatarUrl === undefined ? undefined : String(req.body.avatarUrl);
+    if ((name !== undefined && (name.length < 2 || name.length > 120)) || (role !== undefined && role.length > 120) || (bio !== undefined && bio.length > 500) || (gender !== undefined && !['male', 'female'].includes(gender)) || (avatarUrl !== undefined && avatarUrl.length > 3_000_000)) {
       res.status(400).json({ error: 'Invalid profile values.' });
       return;
     }
-    const user = await db.updateUser(req.user!.id, { name, role });
+    if (avatarUrl !== undefined && avatarUrl && !/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(avatarUrl) && !['/default-avatar-male.svg', '/default-avatar-female.svg'].includes(avatarUrl)) { res.status(400).json({ error: 'Profile picture must be an uploaded image.' }); return; }
+    const user = await db.updateUser(req.user!.id, { name, role, bio, gender, avatarUrl });
+    io.emit('users:updated', await db.getUsers());
     res.json({ user });
+  }));
+
+  app.post('/api/me/office-intro', asyncRoute(async (req, res) => {
+    const user = await db.acknowledgeOfficeIntro(req.user!.id);
+    res.json({ user: user && safeUser(user) });
   }));
 
   app.post('/api/admin/users', requireAdmin, asyncRoute(async (req, res) => {
@@ -199,6 +217,8 @@ async function startServer() {
     const password = String(req.body?.password || '');
     const name = String(req.body?.name || '').trim();
     const role = String(req.body?.role || 'Member').trim();
+    const gender = req.body?.gender === 'female' ? 'female' : 'male';
+    const defaultFloorId = typeof req.body?.defaultFloorId === 'string' ? req.body.defaultFloorId : undefined;
     if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
       res.status(400).json({ error: 'Username must be 3–32 characters using letters, numbers, dots, dashes, or underscores.' });
       return;
@@ -211,11 +231,16 @@ async function startServer() {
       res.status(400).json({ error: 'Invalid name or role.' });
       return;
     }
+    if (defaultFloorId && !(await db.getFloors()).some((floor) => floor.id === defaultFloorId)) {
+      res.status(400).json({ error: 'Select a valid default floor.' });
+      return;
+    }
     try {
       const user = await db.createUser({
-        id: crypto.randomUUID(), username, passwordHash: await hashPassword(password), name, role,
+        id: crypto.randomUUID(), username, passwordHash: await hashPassword(password), name, role, defaultFloorId, gender,
       });
       io.emit('users:updated', await db.getUsers());
+      io.emit('rooms:updated', await db.getRooms());
       res.status(201).json({ user: safeUser(user) });
     } catch (error: any) {
       if (error?.code === '23505') {
@@ -238,6 +263,8 @@ async function startServer() {
     const password = req.body?.password ? String(req.body.password) : undefined;
     const isAdmin = typeof req.body?.isAdmin === 'boolean' ? req.body.isAdmin : undefined;
     const isActive = typeof req.body?.isActive === 'boolean' ? req.body.isActive : undefined;
+    const defaultFloorId = req.body?.defaultFloorId === undefined ? undefined : String(req.body.defaultFloorId);
+    const gender = req.body?.gender === undefined ? undefined : String(req.body.gender) as 'male' | 'female';
     const requesterIsOwner = req.user!.username === 'admin';
 
     if (target.username === 'admin' && !requesterIsOwner) {
@@ -268,12 +295,18 @@ async function startServer() {
       res.status(400).json({ error: 'New passwords must be between 10 and 128 characters.' });
       return;
     }
+    if (defaultFloorId && !(await db.getFloors()).some((floor) => floor.id === defaultFloorId)) {
+      res.status(400).json({ error: 'Select a valid default floor.' });
+      return;
+    }
+    if (gender !== undefined && !['male', 'female'].includes(gender)) { res.status(400).json({ error: 'Select a valid gender.' }); return; }
     try {
       const user = await db.adminUpdateUser(target.id, {
-        name, username, role, isAdmin, isActive,
-        passwordHash: password ? await hashPassword(password) : undefined,
+        name, username, role, gender, isAdmin, isActive,
+        passwordHash: password ? await hashPassword(password) : undefined, defaultFloorId,
       });
       io.emit('users:updated', await db.getUsers());
+      if (defaultFloorId) io.emit('rooms:updated', await db.getRooms());
       res.json({ user: user && safeUser(user) });
     } catch (error: any) {
       if (error?.code === '23505') {
@@ -296,11 +329,16 @@ async function startServer() {
     }
     await db.deleteUser(target.id);
     io.emit('users:updated', await db.getUsers());
+    io.emit('rooms:updated', await db.getRooms());
+    io.emit('room:occupancy_changed', { roomOccupancyMap: await db.getRoomOccupancyMap() });
     res.status(204).end();
   }));
 
-  app.get('/api/admin/analytics', requireAdmin, asyncRoute(async (_req, res) => {
-    res.json(await db.getAdminAnalytics());
+  app.get('/api/admin/analytics', requireAdmin, asyncRoute(async (req, res) => {
+    const requestedDays = Number(req.query.days);
+    const days = [7, 30, 90].includes(requestedDays) ? requestedDays : 7;
+    const userId = typeof req.query.userId === 'string' && req.query.userId.trim() ? req.query.userId.trim() : undefined;
+    res.json(await db.getAdminAnalytics(days, userId));
   }));
 
   app.post('/api/admin/rooms', requireAdmin, asyncRoute(async (req, res) => {
@@ -308,25 +346,45 @@ async function startServer() {
     const description = String(req.body?.description || '').trim();
     const type = String(req.body?.type || 'meeting') as 'meeting' | 'theater' | 'game';
     const capacity = Number(req.body?.capacity);
-    if (name.length < 2 || name.length > 120 || description.length > 1000 || !['meeting', 'theater', 'game'].includes(type) || !Number.isInteger(capacity) || capacity < 1 || capacity > 1000) {
+    const floorId = String(req.body?.floorId || '');
+    if (name.length < 2 || name.length > 120 || description.length > 1000 || !['meeting', 'theater', 'game'].includes(type) || !Number.isInteger(capacity) || capacity < 1 || capacity > 1000 || !floorId || !(await db.getFloors()).some((floor) => floor.id === floorId)) {
       res.status(400).json({ error: 'Invalid room values.' });
       return;
     }
-    const room = await db.createRoom({ id: crypto.randomUUID(), name, type, capacity, description });
+    const room = await db.createRoom({ id: crypto.randomUUID(), name, type, capacity, description, floorId });
     io.emit('rooms:updated', await db.getRooms());
     res.status(201).json({ room });
   }));
 
   app.patch('/api/admin/rooms/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const existingRoom = await db.getRoom(req.params.id);
+    if (!existingRoom) {
+      res.status(404).json({ error: 'Room not found.' });
+      return;
+    }
     const name = req.body?.name === undefined ? undefined : String(req.body.name).trim();
     const description = req.body?.description === undefined ? undefined : String(req.body.description).trim();
-    const type = req.body?.type === undefined ? undefined : String(req.body.type) as 'meeting' | 'theater' | 'game';
+    const type = req.body?.type === undefined ? undefined : String(req.body.type) as 'personal' | 'meeting' | 'theater' | 'game';
     const capacity = req.body?.capacity === undefined ? undefined : Number(req.body.capacity);
-    if (name !== undefined && (name.length < 2 || name.length > 120) || description !== undefined && description.length > 1000 || type !== undefined && !['meeting', 'theater', 'game'].includes(type) || capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1 || capacity > 1000)) {
+    const floorId = req.body?.floorId === undefined ? undefined : String(req.body.floorId);
+    const allowedTypes = existingRoom.isPersonal ? ['personal'] : ['meeting', 'theater', 'game'];
+    if (name !== undefined && (name.length < 2 || name.length > 120) || description !== undefined && description.length > 1000 || type !== undefined && !allowedTypes.includes(type) || capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1 || capacity > 1000)) {
       res.status(400).json({ error: 'Invalid room values.' });
       return;
     }
-    const room = await db.updateRoom(req.params.id, { name, description, type, capacity });
+    if (existingRoom.isPersonal && type !== undefined && type !== 'personal') {
+      res.status(400).json({ error: 'Personal offices must remain personal rooms.' });
+      return;
+    }
+    if (floorId && !(await db.getFloors()).some((floor) => floor.id === floorId)) {
+      res.status(400).json({ error: 'Select a valid floor.' });
+      return;
+    }
+    if (existingRoom.isPersonal && floorId && floorId !== existingRoom.floorId) {
+      res.status(400).json({ error: 'Move a personal office by changing its owner’s default floor.' });
+      return;
+    }
+    const room = await db.updateRoom(req.params.id, { name, description, type, capacity, floorId });
     if (!room) {
       res.status(404).json({ error: 'Room not found.' });
       return;
@@ -336,6 +394,11 @@ async function startServer() {
   }));
 
   app.delete('/api/admin/rooms/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const existingRoom = await db.getRoom(req.params.id);
+    if (existingRoom?.isPersonal) {
+      res.status(400).json({ error: 'A personal office is removed only when its account is deleted.' });
+      return;
+    }
     if (!(await db.deleteRoom(req.params.id))) {
       res.status(404).json({ error: 'Room not found.' });
       return;
@@ -344,12 +407,223 @@ async function startServer() {
     res.status(204).end();
   }));
 
+  app.post('/api/admin/floors', requireAdmin, asyncRoute(async (req, res) => {
+    const name = String(req.body?.name || '').trim();
+    const description = String(req.body?.description || '').trim();
+    const color = String(req.body?.color || '#D9A34A').trim();
+    if (name.length < 2 || name.length > 120 || description.length > 500 || !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      res.status(400).json({ error: 'Invalid floor values.' });
+      return;
+    }
+    const floor = await db.createFloor({ id: crypto.randomUUID(), name, description, color });
+    io.emit('floors:updated', await db.getFloors());
+    res.status(201).json({ floor });
+  }));
+
+  app.patch('/api/admin/floors/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const name = req.body?.name === undefined ? undefined : String(req.body.name).trim();
+    const description = req.body?.description === undefined ? undefined : String(req.body.description).trim();
+    const color = req.body?.color === undefined ? undefined : String(req.body.color).trim();
+    const sortOrder = req.body?.sortOrder === undefined ? undefined : Number(req.body.sortOrder);
+    if (name !== undefined && (name.length < 2 || name.length > 120) || description !== undefined && description.length > 500 || color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(color) || sortOrder !== undefined && !Number.isInteger(sortOrder)) {
+      res.status(400).json({ error: 'Invalid floor values.' });
+      return;
+    }
+    const floor = await db.updateFloor(req.params.id, { name, description, color, sortOrder });
+    if (!floor) { res.status(404).json({ error: 'Floor not found.' }); return; }
+    io.emit('floors:updated', await db.getFloors());
+    res.json({ floor });
+  }));
+
+  app.delete('/api/admin/floors/:id', requireAdmin, asyncRoute(async (req, res) => {
+    if (!(await db.getFloors()).some((floor) => floor.id === req.params.id)) { res.status(404).json({ error: 'Floor not found.' }); return; }
+    if (!(await db.deleteFloor(req.params.id))) { res.status(400).json({ error: 'The workspace must keep at least one floor.' }); return; }
+    io.emit('floors:updated', await db.getFloors());
+    io.emit('users:updated', await db.getUsers());
+    io.emit('rooms:updated', await db.getRooms());
+    res.status(204).end();
+  }));
+
   app.get('/api/users', asyncRoute(async (_req, res) => { res.json(await db.getUsers()); }));
   app.get('/api/teams', asyncRoute(async (_req, res) => { res.json(await db.getTeams()); }));
   app.get('/api/rooms', asyncRoute(async (_req, res) => { res.json(await db.getRooms()); }));
+  app.get('/api/floors', asyncRoute(async (_req, res) => { res.json(await db.getFloors()); }));
   app.get('/api/presences', asyncRoute(async (_req, res) => { res.json(await db.getPresences()); }));
   app.get('/api/occupancy', asyncRoute(async (_req, res) => { res.json(await db.getRoomOccupancyMap()); }));
   app.get('/api/leaderboard', asyncRoute(async (_req, res) => { res.json(await db.getLeaderboard()); }));
+  app.get('/api/live-state', asyncRoute(async (_req, res) => { res.json(await initialState()); }));
+  app.get('/api/shelves/:userId', asyncRoute(async (req, res) => {
+    const owner = await db.getUser(req.params.userId);
+    if (!owner || owner.isActive === false) { res.status(404).json({ error: 'Shelf owner not found.' }); return; }
+    res.json({ owner: safeUser(owner), items: await db.getShelfItems(owner.id) });
+  }));
+  app.post('/api/shelf/items', asyncRoute(async (req, res) => {
+    const type = String(req.body?.type || '');
+    const content = String(req.body?.content || '').trim();
+    const title = req.body?.title === undefined ? undefined : String(req.body.title).trim();
+    const durationSeconds = Number(req.body?.durationSeconds || 0);
+    if (!['image', 'video', 'url', 'sticker'].includes(type) || !content || content.length > 11_500_000 || title && title.length > 160) {
+      res.status(400).json({ error: 'Invalid shelf item.' }); return;
+    }
+    if (type === 'image' && !/^data:image\/(?:jpeg|png|webp|gif);base64,/i.test(content)) {
+      res.status(400).json({ error: 'Shelf pictures must be JPEG, PNG, WebP, or GIF files.' }); return;
+    }
+    if (type === 'video' && (!/^data:video\/(?:mp4|webm|quicktime);base64,/i.test(content) || !durationSeconds || durationSeconds > 15)) {
+      res.status(400).json({ error: 'Shelf videos must be playable files no longer than 15 seconds.' }); return;
+    }
+    if (type === 'url') {
+      try {
+        const parsed = new URL(content);
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported URL');
+      } catch {
+        res.status(400).json({ error: 'Enter a valid HTTP or HTTPS URL.' }); return;
+      }
+    }
+    if (type === 'sticker' && content.length > 32) { res.status(400).json({ error: 'That sticker is too large.' }); return; }
+    if ((await db.getShelfItems(req.user!.id)).length >= 36) { res.status(400).json({ error: 'A shelf can hold up to 36 items.' }); return; }
+    const item = await db.createShelfItem({ id: crypto.randomUUID(), ownerUserId: req.user!.id, type: type as 'image' | 'video' | 'url' | 'sticker', content, title });
+    io.emit('shelf:updated', { ownerUserId: req.user!.id });
+    res.status(201).json({ item });
+  }));
+  app.delete('/api/shelf/items/:id', asyncRoute(async (req, res) => {
+    if (!(await db.deleteShelfItem(req.params.id, req.user!.id))) { res.status(404).json({ error: 'Shelf item not found.' }); return; }
+    io.emit('shelf:updated', { ownerUserId: req.user!.id });
+    res.status(204).end();
+  }));
+  app.get('/api/chat/conversations', asyncRoute(async (req, res) => { res.json(await db.getConversations(req.user!.id)); }));
+  app.post('/api/chat/dm/:userId', asyncRoute(async (req, res) => {
+    const target = await db.getUser(req.params.userId);
+    if (!target || target.isActive === false || target.id === req.user!.id) { res.status(400).json({ error: 'Invalid direct-message recipient.' }); return; }
+    const conversation = await db.getOrCreateDm(req.user!.id, target.id);
+    await emitChat(conversation.id, 'chat:conversation_updated', { conversationId: conversation.id });
+    res.status(201).json({ conversation });
+  }));
+  app.post('/api/admin/chat/conversations', requireAdmin, asyncRoute(async (req, res) => {
+    const type = String(req.body?.type || '') as 'group' | 'channel';
+    const name = String(req.body?.name || '').trim();
+    const isPrivate = Boolean(req.body?.isPrivate);
+    const memberIds = Array.isArray(req.body?.memberIds) ? req.body.memberIds.map(String) : [];
+    if (!['group', 'channel'].includes(type) || name.length < 2 || name.length > 120) { res.status(400).json({ error: 'Invalid group or channel values.' }); return; }
+    const conversation = await db.createConversation({ type, name, isPrivate, createdBy: req.user!.id, memberIds });
+    await emitChat(conversation.id, 'chat:conversation_updated', { conversationId: conversation.id });
+    res.status(201).json({ conversation });
+  }));
+  app.patch('/api/admin/chat/conversations/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const name = req.body?.name === undefined ? undefined : String(req.body.name).trim();
+    const isPrivate = req.body?.isPrivate === undefined ? undefined : Boolean(req.body.isPrivate);
+    const memberIds = Array.isArray(req.body?.memberIds) ? req.body.memberIds.map(String) : undefined;
+    if (name !== undefined && (name.length < 2 || name.length > 120)) { res.status(400).json({ error: 'Invalid conversation name.' }); return; }
+    await db.updateConversation(req.params.id, { name, isPrivate, memberIds });
+    await emitChat(req.params.id, 'chat:conversation_updated', { conversationId: req.params.id });
+    res.status(204).end();
+  }));
+  app.delete('/api/admin/chat/conversations/:id', requireAdmin, asyncRoute(async (req, res) => {
+    if (!(await db.deleteConversation(req.params.id))) { res.status(404).json({ error: 'Conversation not found or cannot be deleted.' }); return; }
+    res.status(204).end();
+  }));
+  app.get('/api/chat/conversations/:id/messages', asyncRoute(async (req, res) => {
+    if (!(await db.isConversationMember(req.params.id, req.user!.id))) { res.status(403).json({ error: 'Conversation access denied.' }); return; }
+    const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : undefined;
+    res.json(await db.getMessages(req.params.id, req.user!.id, query));
+  }));
+  app.post('/api/chat/conversations/:id/messages', asyncRoute(async (req, res) => {
+    if (!(await db.isConversationMember(req.params.id, req.user!.id))) { res.status(403).json({ error: 'Conversation access denied.' }); return; }
+    const content = String(req.body?.content || '').trim();
+    const replyToId = req.body?.replyToId ? String(req.body.replyToId) : undefined;
+    if (!content || content.length > 4000) { res.status(400).json({ error: 'Messages must contain 1–4000 characters.' }); return; }
+    const message = await db.createMessage(req.params.id, req.user!.id, { content, replyToId });
+    await emitChat(req.params.id, 'chat:message', message);
+    res.status(201).json({ message });
+  }));
+  app.patch('/api/chat/messages/:id', asyncRoute(async (req, res) => {
+    const content = String(req.body?.content || '').trim();
+    if (!content || content.length > 4000) { res.status(400).json({ error: 'Invalid message.' }); return; }
+    const message = await db.updateMessage(req.params.id, req.user!.id, content);
+    if (!message) { res.status(404).json({ error: 'Message not found or cannot be edited.' }); return; }
+    await emitChat(message.conversationId, 'chat:message_updated', message);
+    res.json({ message });
+  }));
+  app.delete('/api/chat/messages/:id', asyncRoute(async (req, res) => {
+    const scope = req.query.scope === 'all' ? 'all' : 'self';
+    const canModerate = Boolean(req.user!.isAdmin) || ['admin', 'deykord'].includes(req.user!.username.toLowerCase());
+    const result = await db.deleteMessage(req.params.id, req.user!.id, scope, canModerate);
+    if (!result) { res.status(409).json({ error: scope === 'all' ? 'This message has already been read and can no longer be deleted for everyone.' : 'Message not found or cannot be deleted.' }); return; }
+    if (result.scope === 'all') await emitChat(result.conversationId, 'chat:message_deleted', { conversationId: result.conversationId, messageId: req.params.id });
+    else io.to(`chat:user:${req.user!.id}`).emit('chat:message_hidden', { conversationId: result.conversationId, messageId: req.params.id });
+    res.status(204).end();
+  }));
+  app.post('/api/chat/messages/:id/reactions', asyncRoute(async (req, res) => {
+    const emoji = String(req.body?.emoji || '');
+    if (!emoji || emoji.length > 16) { res.status(400).json({ error: 'Invalid reaction.' }); return; }
+    const conversationId = await db.toggleChatReaction(req.params.id, req.user!.id, emoji);
+    if (!conversationId) { res.status(404).json({ error: 'Message not found.' }); return; }
+    await emitChat(conversationId, 'chat:reaction_updated', { conversationId, messageId: req.params.id });
+    res.status(204).end();
+  }));
+  app.post('/api/chat/messages/:id/pin', asyncRoute(async (req, res) => {
+    const message = await db.toggleMessagePin(req.params.id, req.user!.id);
+    if (!message) { res.status(404).json({ error: 'Message not found or conversation access denied.' }); return; }
+    await emitChat(message.conversationId, 'chat:message_updated', message);
+    await emitChat(message.conversationId, 'chat:conversation_updated', { conversationId: message.conversationId });
+    res.json({ message });
+  }));
+  app.post('/api/chat/conversations/:id/read', asyncRoute(async (req, res) => {
+    if (!(await db.isConversationMember(req.params.id, req.user!.id))) { res.status(403).json({ error: 'Conversation access denied.' }); return; }
+    await db.markConversationRead(req.params.id, req.user!.id);
+    res.status(204).end();
+  }));
+  app.get('/api/calendar/events', asyncRoute(async (req, res) => {
+    const now = new Date();
+    const from = req.query.from ? new Date(String(req.query.from)) : new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const to = req.query.to ? new Date(String(req.query.to)) : new Date(now.getFullYear(), now.getMonth() + 2, 1);
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || to <= from) { res.status(400).json({ error: 'Invalid calendar range.' }); return; }
+    res.json({ events: await db.getCalendarEvents(req.user!.id, from, to) });
+  }));
+  app.post('/api/calendar/events', asyncRoute(async (req, res) => {
+    const title = String(req.body?.title || '').trim();
+    const startsAt = new Date(String(req.body?.startsAt || ''));
+    const endsAt = new Date(String(req.body?.endsAt || ''));
+    const description = String(req.body?.description || '').trim().slice(0, 2000);
+    const location = String(req.body?.location || '').trim().slice(0, 200);
+    const meetingUrl = String(req.body?.meetingUrl || '').trim().slice(0, 2000);
+    const color = /^#[0-9a-fA-F]{6}$/.test(String(req.body?.color || '')) ? String(req.body.color) : '#D9A34A';
+    if (title.length < 2 || title.length > 160 || !Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) { res.status(400).json({ error: 'Enter a title and a valid start/end time.' }); return; }
+    const event = await db.createCalendarEvent({ id: crypto.randomUUID(), ownerUserId: req.user!.id, title, description, location, meetingUrl, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(), color, allDay: Boolean(req.body?.allDay) });
+    io.to(`chat:user:${req.user!.id}`).emit('calendar:updated', { userId: req.user!.id });
+    res.status(201).json({ event });
+  }));
+  app.patch('/api/calendar/events/:id', asyncRoute(async (req, res) => {
+    const title = req.body?.title === undefined ? undefined : String(req.body.title).trim();
+    const startsAt = req.body?.startsAt === undefined ? undefined : new Date(String(req.body.startsAt));
+    const endsAt = req.body?.endsAt === undefined ? undefined : new Date(String(req.body.endsAt));
+    if (title !== undefined && (title.length < 2 || title.length > 160) || startsAt && !Number.isFinite(startsAt.getTime()) || endsAt && !Number.isFinite(endsAt.getTime()) || startsAt && endsAt && endsAt <= startsAt) { res.status(400).json({ error: 'Invalid calendar values.' }); return; }
+    const event = await db.updateCalendarEvent(req.params.id, req.user!.id, { title, description: req.body?.description === undefined ? undefined : String(req.body.description).trim().slice(0, 2000), location: req.body?.location === undefined ? undefined : String(req.body.location).trim().slice(0, 200), meetingUrl: req.body?.meetingUrl === undefined ? undefined : String(req.body.meetingUrl).trim().slice(0, 2000), startsAt: startsAt?.toISOString(), endsAt: endsAt?.toISOString(), color: req.body?.color && /^#[0-9a-fA-F]{6}$/.test(String(req.body.color)) ? String(req.body.color) : undefined, allDay: typeof req.body?.allDay === 'boolean' ? req.body.allDay : undefined });
+    if (!event) { res.status(404).json({ error: 'Calendar event not found.' }); return; }
+    io.to(`chat:user:${req.user!.id}`).emit('calendar:updated', { userId: req.user!.id });
+    res.json({ event });
+  }));
+  app.delete('/api/calendar/events/:id', asyncRoute(async (req, res) => {
+    if (!(await db.deleteCalendarEvent(req.params.id, req.user!.id))) { res.status(404).json({ error: 'Calendar event not found.' }); return; }
+    io.to(`chat:user:${req.user!.id}`).emit('calendar:updated', { userId: req.user!.id });
+    res.status(204).end();
+  }));
+  app.get('/api/stories', asyncRoute(async (_req, res) => { res.json({ stories: await db.getActiveStories() }); }));
+  app.post('/api/stories', asyncRoute(async (req, res) => {
+    const contentType = String(req.body?.contentType || '') as 'image' | 'video' | 'text';
+    const content = String(req.body?.content || '');
+    const caption = String(req.body?.caption || '').trim().slice(0, 240);
+    if (!['image', 'video', 'text'].includes(contentType) || !content) { res.status(400).json({ error: 'Choose valid story content.' }); return; }
+    if (contentType === 'image' && (!content.startsWith('data:image/') || content.length > 5_800_000) || contentType === 'video' && (!content.startsWith('data:video/') || content.length > 11_500_000) || contentType === 'text' && content.length > 500) { res.status(400).json({ error: 'Story content is invalid or too large.' }); return; }
+    if ((await db.getActiveStories()).filter((story) => story.userId === req.user!.id).length >= 10) { res.status(400).json({ error: 'You can have up to 10 active stories.' }); return; }
+    const story = await db.createStory({ id: crypto.randomUUID(), userId: req.user!.id, contentType, content, caption });
+    io.emit('stories:updated');
+    res.status(201).json({ story });
+  }));
+  app.delete('/api/stories/:id', asyncRoute(async (req, res) => {
+    if (!(await db.deleteStory(req.params.id, req.user!.id, Boolean(req.user!.isAdmin)))) { res.status(404).json({ error: 'Story not found.' }); return; }
+    io.emit('stories:updated');
+    res.status(204).end();
+  }));
   app.get('/api/schema', requireAdmin, asyncRoute(async (_req, res) => { res.json({ ddl: db.getSqlDDL() }); }));
   app.get('/api/rtc-config', asyncRoute(async (req, res) => {
     if (!process.env.TURN_SECRET) {
@@ -382,27 +656,42 @@ async function startServer() {
   });
 
   const userSockets = new Map<string, Set<string>>();
+  const socketIdleStates = new Map<string, 'active' | 'afk' | 'offline'>();
+  const mediaReadyByRoom = new Map<string, Set<string>>();
+  const pendingKnocks = new Map<string, { sentAt: number; timer: NodeJS.Timeout }>();
+  const userEventQueues = new Map<string, Promise<void>>();
   const runSocket = (socket: Socket, action: () => Promise<void>) => {
-    action().catch((error) => {
+    const queueKey = (socket.data.user as User | undefined)?.id || socket.id;
+    const previous = userEventQueues.get(queueKey) || Promise.resolve();
+    const next = previous.then(action).catch((error) => {
       console.error('[Socket.IO] Event failed:', error);
       socket.emit('app:error', { message: 'The action could not be completed.' });
     });
+    userEventQueues.set(queueKey, next);
+    void next.finally(() => {
+      if (userEventQueues.get(queueKey) === next) userEventQueues.delete(queueKey);
+    });
   };
+  const formatDuration = (seconds: number) => seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 
   async function initialState() {
-    const [users, teams, rooms, presences, roomOccupancy, leaderboard] = await Promise.all([
-      db.getUsers(), db.getTeams(), db.getRooms(), db.getPresences(), db.getRoomOccupancyMap(), db.getLeaderboard(),
+    const [users, teams, rooms, floors, presences, roomOccupancy, leaderboard] = await Promise.all([
+      db.getUsers(), db.getTeams(), db.getRooms(), db.getFloors(), db.getPresences(), db.getRoomOccupancyMap(), db.getLeaderboard(),
     ]);
-    return { users, teams, rooms, presences, roomOccupancy, leaderboard };
+    return { users, teams, rooms, floors, presences, roomOccupancy, leaderboard };
   }
 
   io.on('connection', (socket) => {
     const user = socket.data.user as User;
     const sockets = userSockets.get(user.id) || new Set<string>();
+    const isFirstConnection = sockets.size === 0;
     sockets.add(socket.id);
     userSockets.set(user.id, sockets);
+    socketIdleStates.set(socket.id, 'active');
+    socket.join(`chat:user:${user.id}`);
 
     runSocket(socket, async () => {
+      if (isFirstConnection) await db.startActivitySession(user.id);
       const presence = await db.updatePresence(user.id, { status: 'online' });
       socket.emit('presence:init', await initialState());
       io.emit('presence:updated', presence);
@@ -411,31 +700,121 @@ async function startServer() {
     socket.on('user:update_status', ({ updates } = {}) => runSocket(socket, async () => {
       const allowed = ['status', 'isMuted', 'isCameraOn', 'isSharingScreen', 'currentMusic', 'customStatus'];
       const clean = Object.fromEntries(Object.entries(updates || {}).filter(([key]) => allowed.includes(key)));
+      if (clean.status && !['online', 'in_call', 'focusing', 'listening_music', 'away'].includes(String(clean.status))) delete clean.status;
       io.emit('presence:updated', await db.updatePresence(user.id, clean));
     }));
 
+    socket.on('presence:idle_state', ({ state, restoreStatus } = {}) => runSocket(socket, async () => {
+      if (!['active', 'afk', 'offline'].includes(String(state))) return;
+      socketIdleStates.set(socket.id, state);
+      const connectedSockets = [...(userSockets.get(user.id) || [])];
+      const connectedStates = connectedSockets.map((socketId) => socketIdleStates.get(socketId) || 'active');
+      const aggregateState = connectedStates.includes('active')
+        ? 'active'
+        : connectedStates.length > 0 && connectedStates.every((value) => value === 'offline') ? 'offline' : 'afk';
+
+      if (aggregateState === 'active') {
+        const safeStatus = ['online', 'in_call', 'focusing', 'listening_music'].includes(String(restoreStatus))
+          ? restoreStatus
+          : 'online';
+        await db.resumeActivitySession(user.id);
+        io.emit('presence:updated', await db.updatePresence(user.id, { status: safeStatus, customStatus: undefined }));
+        return;
+      }
+
+      await db.pauseActivitySession(user.id);
+      if (aggregateState === 'afk') {
+        io.emit('presence:updated', await db.updatePresence(user.id, { status: 'away', customStatus: 'AFK' }));
+        return;
+      }
+
+      const { previousRoomId } = await db.leaveRoom(user.id);
+      if (previousRoomId) {
+        mediaReadyByRoom.get(previousRoomId)?.delete(user.id);
+        socket.leave(previousRoomId);
+        socket.to(previousRoomId).emit('webrtc:peer-left', { roomId: previousRoomId, peerId: user.id, socketId: socket.id });
+        io.emit('room:occupancy_changed', { roomId: previousRoomId, roomOccupancyMap: await db.getRoomOccupancyMap() });
+      }
+      io.emit('presence:updated', await db.updatePresence(user.id, {
+        status: 'offline', customStatus: 'AFK', currentRoomId: null,
+        isMuted: false, isCameraOn: false, isSharingScreen: false,
+      }));
+    }));
+
     socket.on('room:join', ({ roomId } = {}) => runSocket(socket, async () => {
-      if (!roomId || !(await db.getRooms()).some((room) => room.id === roomId)) return;
+      const targetRoom = (await db.getRooms()).find((room) => room.id === roomId);
+      if (!roomId || !targetRoom) return;
       socket.join(roomId);
-      const { occupants } = await db.joinRoom(roomId, user.id);
+      const { occupants, previousRoomId, previousDurationSeconds } = await db.joinRoom(roomId, user.id);
+      if (previousRoomId && previousRoomId !== roomId) {
+        mediaReadyByRoom.get(previousRoomId)?.delete(user.id);
+        socket.leave(previousRoomId);
+        socket.to(previousRoomId).emit('webrtc:peer-left', { roomId: previousRoomId, peerId: user.id, socketId: socket.id });
+        const oldRoom = (await db.getRooms()).find((room) => room.id === previousRoomId);
+        if (oldRoom?.ownerUserId && oldRoom.ownerUserId !== user.id) {
+          const left = await db.createDmSystemEvent(user.id, oldRoom.ownerUserId, 'office_left', `${user.name} left the office.`, { roomId: previousRoomId, durationSeconds: previousDurationSeconds });
+          await emitChat(left.conversationId, 'chat:message', left);
+          const ended = await db.createDmSystemEvent(user.id, oldRoom.ownerUserId, 'call_ended', `Call ended · ${formatDuration(previousDurationSeconds)}.`, { roomId: previousRoomId, durationSeconds: previousDurationSeconds });
+          await emitChat(ended.conversationId, 'chat:message', ended);
+        }
+      }
       io.emit('room:occupancy_changed', { roomId, occupants, roomOccupancyMap: await db.getRoomOccupancyMap() });
-      socket.to(roomId).emit('webrtc:peer-joined', { roomId, peerId: user.id, socketId: socket.id });
+      io.emit('presence:updated', (await db.getPresences())[user.id]);
+      if (targetRoom.ownerUserId && targetRoom.ownerUserId !== user.id) {
+        const event = await db.createDmSystemEvent(user.id, targetRoom.ownerUserId, 'office_entered', `${user.name} entered the office.`, { roomId });
+        await emitChat(event.conversationId, 'chat:message', event);
+      }
+    }));
+
+    socket.on('webrtc:ready', ({ roomId } = {}) => runSocket(socket, async () => {
+      if (!roomId) return;
+      const presence = (await db.getPresences())[user.id];
+      if (presence?.currentRoomId !== roomId) return;
+      const readyUsers = mediaReadyByRoom.get(roomId) || new Set<string>();
+      const existingReadyUsers = [...readyUsers].filter((userId) => userId !== user.id);
+      readyUsers.add(user.id);
+      mediaReadyByRoom.set(roomId, readyUsers);
+      for (const existingUserId of existingReadyUsers) {
+        for (const socketId of userSockets.get(existingUserId) || []) io.to(socketId).emit('webrtc:peer-joined', { roomId, peerId: user.id, socketId: socket.id });
+      }
     }));
 
     socket.on('room:leave', () => runSocket(socket, async () => {
-      const { previousRoomId } = await db.leaveRoom(user.id);
+      const { previousRoomId, durationSeconds } = await db.leaveRoom(user.id);
       if (!previousRoomId) return;
+      mediaReadyByRoom.get(previousRoomId)?.delete(user.id);
       socket.leave(previousRoomId);
       io.emit('room:occupancy_changed', {
         roomId: previousRoomId,
         occupants: (await db.getRoomOccupancyMap())[previousRoomId] || [],
         roomOccupancyMap: await db.getRoomOccupancyMap(),
       });
+      io.emit('presence:updated', (await db.getPresences())[user.id]);
       socket.to(previousRoomId).emit('webrtc:peer-left', { roomId: previousRoomId, peerId: user.id, socketId: socket.id });
+      const previousRoom = (await db.getRooms()).find((room) => room.id === previousRoomId);
+      if (previousRoom?.ownerUserId && previousRoom.ownerUserId !== user.id) {
+        const event = await db.createDmSystemEvent(user.id, previousRoom.ownerUserId, 'office_left', `${user.name} left the office.`, { roomId: previousRoomId, durationSeconds });
+        await emitChat(event.conversationId, 'chat:message', event);
+        const ended = await db.createDmSystemEvent(user.id, previousRoom.ownerUserId, 'call_ended', `Call ended · ${formatDuration(durationSeconds)}.`, { roomId: previousRoomId, durationSeconds });
+        await emitChat(ended.conversationId, 'chat:message', ended);
+      }
     }));
 
     socket.on('knock:send', ({ toUserId, message } = {}) => runSocket(socket, async () => {
       if (!toUserId || !(await db.getUser(toUserId))) return;
+      const pendingKey = `${toUserId}:${user.id}`;
+      const prior = pendingKnocks.get(pendingKey); if (prior) clearTimeout(prior.timer);
+      const started = await db.createDmSystemEvent(user.id, toUserId, 'call_started', `${user.name} started a call.`);
+      await emitChat(started.conversationId, 'chat:message', started);
+      const sentAt = Date.now();
+      const timer = setTimeout(() => { void (async () => {
+        const pending = pendingKnocks.get(pendingKey);
+        if (!pending || pending.sentAt !== sentAt) return;
+        pendingKnocks.delete(pendingKey);
+        const missed = await db.createDmSystemEvent(user.id, toUserId, 'call_missed', `Missed call from ${user.name}.`);
+        await emitChat(missed.conversationId, 'chat:message', missed);
+      })(); }, 30_000);
+      pendingKnocks.set(pendingKey, { sentAt, timer });
       const payload = {
         id: `knock-${Date.now()}`, fromUserId: user.id, fromUserName: user.name,
         fromUserAvatar: user.avatarUrl, toUserId,
@@ -444,21 +823,54 @@ async function startServer() {
       for (const socketId of userSockets.get(toUserId) || []) io.to(socketId).emit('knock:received', payload);
     }));
 
-    socket.on('knock:respond', ({ toUserId, accepted } = {}) => {
+    socket.on('knock:respond', ({ toUserId, accepted } = {}) => runSocket(socket, async () => {
       if (!toUserId) return;
+      const pendingKey = `${user.id}:${toUserId}`;
+      const pending = pendingKnocks.get(pendingKey);
+      if (!pending || Date.now() - pending.sentAt > 2 * 60 * 1000) return;
+      clearTimeout(pending.timer);
+      pendingKnocks.delete(pendingKey);
+      const personalOffice = accepted ? await db.getPersonalRoom(user.id) : undefined;
       for (const socketId of userSockets.get(toUserId) || []) {
-        io.to(socketId).emit('knock:responded', { fromUserId: user.id, accepted: Boolean(accepted) });
+        io.to(socketId).emit('knock:responded', {
+          fromUserId: user.id,
+          accepted: Boolean(accepted && personalOffice),
+          roomId: personalOffice?.id,
+        });
       }
-    });
+      const event = await db.createDmSystemEvent(user.id, toUserId, accepted ? 'call_accepted' : 'call_declined', accepted ? `${user.name} accepted the call.` : `${user.name} declined the call.`);
+      await emitChat(event.conversationId, 'chat:message', event);
+    }));
+
+    socket.on('room:invite', ({ toUserId } = {}) => runSocket(socket, async () => {
+      if (!toUserId || toUserId === user.id || !(await db.getUser(toUserId))) return;
+      const presence = (await db.getPresences())[user.id];
+      const room = (await db.getRooms()).find((item) => item.id === presence?.currentRoomId) || await db.getPersonalRoom(user.id);
+      if (!room) return;
+      const roomOwner = room.ownerUserId ? await db.getUser(room.ownerUserId) : undefined;
+      const roomName = roomOwner ? `${roomOwner.name}'s Office` : room.name;
+      const payload = { id: `invite-${Date.now()}`, fromUserId: user.id, fromUserName: user.name, fromUserAvatar: user.avatarUrl, toUserId, roomId: room.id, roomName, createdAt: new Date().toISOString() };
+      for (const socketId of userSockets.get(toUserId) || []) io.to(socketId).emit('room:invited', payload);
+      const event = await db.createDmSystemEvent(user.id, toUserId, 'room_invited', `${user.name} invited you to ${roomName}.`, { roomId: room.id });
+      await emitChat(event.conversationId, 'chat:message', event);
+    }));
+
+    socket.on('chat:typing', ({ conversationId, typing } = {}) => runSocket(socket, async () => {
+      if (!conversationId || !(await db.isConversationMember(conversationId, user.id))) return;
+      for (const memberId of await db.getConversationMemberIds(conversationId)) if (memberId !== user.id) io.to(`chat:user:${memberId}`).emit('chat:typing', { conversationId, userId: user.id, name: user.name, typing: Boolean(typing) });
+    }));
 
     socket.on('reaction:send', ({ emoji, roomId } = {}) => runSocket(socket, async () => {
       if (typeof emoji !== 'string' || emoji.length > 16) return;
       io.emit('reaction:broadcast', await db.addReaction({ userId: user.id, emoji, roomId }));
     }));
 
-    socket.on('hand:update', ({ raised } = {}) => {
+    socket.on('hand:update', ({ raised } = {}) => runSocket(socket, async () => {
+      const presence = (await db.getPresences())[user.id];
+      const room = (await db.getRooms()).find((item) => item.id === presence?.currentRoomId);
+      if (room?.type !== 'meeting') return;
       io.emit('hand:updated', { userId: user.id, raised: Boolean(raised) });
-    });
+    }));
 
     for (const event of ['webrtc:offer', 'webrtc:answer', 'webrtc:ice-candidate'] as const) {
       socket.on(event, (payload = {}) => {
@@ -471,15 +883,33 @@ async function startServer() {
     }
 
     socket.on('disconnect', () => runSocket(socket, async () => {
+      socketIdleStates.delete(socket.id);
       const active = userSockets.get(user.id);
       active?.delete(socket.id);
       if (active?.size) return;
       userSockets.delete(user.id);
       io.emit('hand:updated', { userId: user.id, raised: false });
-      const { previousRoomId } = await db.leaveRoom(user.id);
+      const { previousRoomId, durationSeconds } = await db.leaveRoom(user.id);
+      if (previousRoomId) mediaReadyByRoom.get(previousRoomId)?.delete(user.id);
       if (previousRoomId) io.emit('room:occupancy_changed', { roomId: previousRoomId, roomOccupancyMap: await db.getRoomOccupancyMap() });
-      io.emit('presence:updated', await db.updatePresence(user.id, { status: 'offline' }));
+      if (previousRoomId) {
+        const previousRoom = (await db.getRooms()).find((room) => room.id === previousRoomId);
+        if (previousRoom?.ownerUserId && previousRoom.ownerUserId !== user.id) {
+          const left = await db.createDmSystemEvent(user.id, previousRoom.ownerUserId, 'office_left', `${user.name} left the office.`, { roomId: previousRoomId, durationSeconds });
+          await emitChat(left.conversationId, 'chat:message', left);
+          const ended = await db.createDmSystemEvent(user.id, previousRoom.ownerUserId, 'call_ended', `Call ended · ${formatDuration(durationSeconds)}.`, { roomId: previousRoomId, durationSeconds });
+          await emitChat(ended.conversationId, 'chat:message', ended);
+        }
+      }
+      if (await db.getUser(user.id)) {
+        io.emit('presence:updated', await db.updatePresence(user.id, { status: 'offline' }));
+        await db.endActivitySession(user.id);
+      }
     }));
+  });
+
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API endpoint not found.' });
   });
 
   if (process.env.NODE_ENV !== 'production' && process.env.APP_ENV !== 'production') {

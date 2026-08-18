@@ -3,11 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <meta name="theme-color" content="#0a0b0e" />
+    <meta name="description" content="Creativeprocess Office — your modern virtual workplace." />
+    <link rel="icon" type="image/svg+xml" href="/creativeprocess-mark.svg" />
+    <title>Creativeprocess Office</title>
   </head>
   <body>
+    <script>try{const t=localStorage.getItem('creative-office-theme');document.documentElement.dataset.theme=t==='light'||t==='dark'?t:(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark')}catch(e){document.documentElement.dataset.theme='dark'}</script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

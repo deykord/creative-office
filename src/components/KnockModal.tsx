@@ -20,7 +20,7 @@ export const KnockModal: React.FC<KnockModalProps> = ({
   // Outgoing knocking dialog matching Screenshot 4
   if (outgoingTargetUser) {
     return (
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
         <div className="bg-[#1C1C20] border border-[#2D2D30] rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl animate-in zoom-in-95 duration-150 flex flex-col items-center">
           <div className="w-16 h-16 rounded-full bg-[#27272C] flex items-center justify-center mb-6 border border-[#3A3A40]">
             <Hand className="w-8 h-8 text-amber-400 animate-bounce" />
@@ -44,7 +44,7 @@ export const KnockModal: React.FC<KnockModalProps> = ({
   if (!knock) return null;
 
   return (
-    <div className="fixed bottom-20 right-6 z-50 bg-[#1A1A1C] border-2 border-[#D9A34A] rounded-2xl shadow-2xl p-4 max-w-sm w-full animate-in slide-in-from-bottom-5 fade-in duration-200">
+    <div data-knock-ringing="true" className="fixed bottom-20 right-6 z-[130] bg-[#1A1A1C] border-2 border-[#D9A34A] rounded-2xl shadow-2xl p-4 max-w-sm w-full animate-in slide-in-from-bottom-5 fade-in duration-200">
       <div className="flex items-start space-x-3">
         <div className="relative">
           <img

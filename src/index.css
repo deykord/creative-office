@@ -1,5 +1,89 @@
 @import "tailwindcss";
 
+html,
+body,
+#root {
+  min-height: 100%;
+  background: #050608;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+html[data-theme="light"],
+html[data-theme="light"] body,
+html[data-theme="light"] #root {
+  background: #b9bec7;
+  color-scheme: light;
+  color: #18181b;
+}
+
+/* The office uses translucent utility surfaces. These theme mappings keep every
+   floating window, modal, toolbar, and room readable without affecting media. */
+html[data-theme="light"] [class*="bg-[#0"] {
+  background-color: rgba(190, 195, 203, .97) !important;
+}
+
+html[data-theme="light"] [class*="bg-[#1"] {
+  background-color: rgba(211, 214, 220, .97) !important;
+}
+
+html[data-theme="light"] [class*="bg-[#2"] {
+  background-color: #c8ccd3 !important;
+}
+
+html[data-theme="light"] [class*="bg-black/"] {
+  background-color: rgba(167, 173, 183, .76) !important;
+}
+
+html[data-theme="light"] [class*="bg-white/["] {
+  background-color: rgba(15, 23, 42, .045) !important;
+}
+
+html[data-theme="light"] .text-white,
+html[data-theme="light"] .text-zinc-100,
+html[data-theme="light"] .text-zinc-200,
+html[data-theme="light"] .text-zinc-300 {
+  color: #18181b !important;
+}
+
+html[data-theme="light"] .text-zinc-400,
+html[data-theme="light"] .text-zinc-500 {
+  color: #52525b !important;
+}
+
+html[data-theme="light"] .text-zinc-600,
+html[data-theme="light"] .text-zinc-700,
+html[data-theme="light"] .text-zinc-800 {
+  color: #71717a !important;
+}
+
+html[data-theme="light"] [class*="border-white/"],
+html[data-theme="light"] .border-zinc-700,
+html[data-theme="light"] .border-zinc-800 {
+  border-color: rgba(24, 24, 27, .14) !important;
+}
+
+html[data-theme="light"] input,
+html[data-theme="light"] textarea,
+html[data-theme="light"] select {
+  color: #18181b;
+}
+
+html[data-theme="light"] ::-webkit-scrollbar-track { background: #eef0f4; }
+html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #9298a2; }
+
+@layer components {
+  .shelf-action {
+    @apply flex h-8 w-8 items-center justify-center rounded-xl border border-white/[.08] bg-white/[.035] text-zinc-500 transition hover:bg-white/[.07] hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+}
+
 @keyframes floatUp {
   0% {
     opacity: 1;

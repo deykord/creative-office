@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { PresenceStatus, ReactionEvent, KnockEvent } from '../types';
+import { PresenceStatus, ReactionEvent, KnockEvent, UserStatusType } from '../types';
 
 let socket: Socket | null = null;
 let rtcIceServers: RTCIceServer[] = [
@@ -41,6 +41,10 @@ export function updateUserStatus(userId: string, updates: Partial<PresenceStatus
   s.emit('user:update_status', { userId, updates });
 }
 
+export function setIdleStateSocket(state: 'afk' | 'offline' | 'active', restoreStatus?: UserStatusType) {
+  getSocket().emit('presence:idle_state', { state, restoreStatus });
+}
+
 export function joinRoomSocket(roomId: string, userId: string) {
   const s = getSocket();
   s.emit('room:join', { roomId, userId });
@@ -60,6 +64,10 @@ export function respondKnockSocket(toUserId: string, accepted: boolean) {
   getSocket().emit('knock:respond', { toUserId, accepted });
 }
 
+export function sendRoomInviteSocket(toUserId: string) {
+  getSocket().emit('room:invite', { toUserId });
+}
+
 export function sendReactionSocket(userId: string, emoji: string, roomId?: string) {
   const s = getSocket();
   s.emit('reaction:send', { userId, emoji, roomId });
@@ -77,6 +85,8 @@ export class WebRTCManager {
   private localStream: MediaStream | null = null;
   private screenTrack: MediaStreamTrack | null = null;
   private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
+  private makingOffers: Set<string> = new Set();
+  private ignoredOffers: Set<string> = new Set();
   private onRemoteStreamCallback?: (peerId: string, stream: MediaStream) => void;
   private onPeerLeftCallback?: (peerId: string) => void;
   private roomId: string = '';
@@ -91,17 +101,29 @@ export class WebRTCManager {
     this.setupSignalingListeners();
   }
 
-  public async startLocalMedia(video = true, audio = true): Promise<MediaStream | null> {
+  public async startLocalMedia(video = true, audio = true, approvedStream?: MediaStream, audioDeviceId?: string, videoDeviceId?: string): Promise<MediaStream | null> {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       throw new Error('Camera and microphone require a secure HTTPS connection.');
     }
     if (this.localStream) return this.localStream;
+    if (approvedStream) {
+      this.localStream = approvedStream;
+      await this.syncLocalTracksToPeers();
+      return approvedStream;
+    }
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: video ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false,
-      audio: audio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false,
+      video: video ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', ...(videoDeviceId ? { deviceId: { exact: videoDeviceId } } : {}) } : false,
+      audio: audio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(audioDeviceId ? { deviceId: { exact: audioDeviceId } } : {}) } : false,
     });
     this.localStream = stream;
+    await this.syncLocalTracksToPeers();
     return stream;
+  }
+
+  private async syncLocalTracksToPeers() {
+    const audioTrack = this.localStream?.getAudioTracks()[0] || null;
+    const videoTrack = this.screenTrack || this.localStream?.getVideoTracks()[0] || null;
+    await Promise.allSettled(Array.from(this.mediaSenders.values()).flatMap(({ audio, video }) => [audio.replaceTrack(audioTrack), video.replaceTrack(videoTrack)]));
   }
 
   public getLocalStream(): MediaStream | null {
@@ -113,7 +135,7 @@ export class WebRTCManager {
     return this.localStream ? new MediaStream(this.localStream.getTracks()) : null;
   }
 
-  public async setAudioEnabled(enabled: boolean): Promise<MediaStream | null> {
+  public async setAudioEnabled(enabled: boolean, deviceId?: string): Promise<MediaStream | null> {
     const existing = this.localStream?.getAudioTracks()[0];
     if (!enabled) {
       if (existing) {
@@ -125,7 +147,7 @@ export class WebRTCManager {
     }
     if (existing?.readyState === 'live') return this.getPreviewStream();
     const audioStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) },
       video: false,
     });
     const track = audioStream.getAudioTracks()[0];
@@ -136,7 +158,7 @@ export class WebRTCManager {
     return this.getPreviewStream();
   }
 
-  public async setVideoEnabled(enabled: boolean): Promise<MediaStream | null> {
+  public async setVideoEnabled(enabled: boolean, deviceId?: string): Promise<MediaStream | null> {
     const existing = this.localStream?.getVideoTracks()[0];
     if (!enabled) {
       if (existing) {
@@ -148,7 +170,7 @@ export class WebRTCManager {
     }
     if (existing?.readyState === 'live') return this.getPreviewStream();
     const videoStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', ...(deviceId ? { deviceId: { exact: deviceId } } : {}) },
       audio: false,
     });
     const track = videoStream.getVideoTracks()[0];
@@ -157,6 +179,16 @@ export class WebRTCManager {
     this.localStream.addTrack(track);
     if (!this.screenTrack) await Promise.all(Array.from(this.mediaSenders.values()).map(({ video }) => video.replaceTrack(track)));
     return this.getPreviewStream();
+  }
+
+  public async setAudioDevice(deviceId: string): Promise<MediaStream | null> {
+    await this.setAudioEnabled(false);
+    return this.setAudioEnabled(true, deviceId);
+  }
+
+  public async setVideoDevice(deviceId: string): Promise<MediaStream | null> {
+    await this.setVideoEnabled(false);
+    return this.setVideoEnabled(true, deviceId);
   }
 
   public async startScreenShare(): Promise<MediaStream> {
@@ -191,6 +223,10 @@ export class WebRTCManager {
     joinRoomSocket(roomId, userId);
   }
 
+  public announceMediaReady() {
+    if (this.roomId && this.currentUserId) getSocket().emit('webrtc:ready', { roomId: this.roomId });
+  }
+
   public leaveWebRTCRoom() {
     if (this.currentUserId) {
       leaveRoomSocket(this.currentUserId);
@@ -200,6 +236,8 @@ export class WebRTCManager {
     this.mediaSenders.clear();
     this.remotePeerStreams.clear();
     this.pendingIceCandidates.clear();
+    this.makingOffers.clear();
+    this.ignoredOffers.clear();
     this.screenTrack?.stop();
     this.screenTrack = null;
     if (this.localStream) {
@@ -237,6 +275,7 @@ export class WebRTCManager {
 
     s.on('webrtc:ice-candidate', async ({ roomId, senderId, candidate }) => {
       if (roomId !== this.roomId || senderId === this.currentUserId) return;
+      if (this.ignoredOffers.has(senderId)) return;
       const pc = this.peerConnections.get(senderId);
       if (pc?.remoteDescription && candidate) {
         try {
@@ -260,6 +299,9 @@ export class WebRTCManager {
       }
       this.mediaSenders.delete(peerId);
       this.remotePeerStreams.delete(peerId);
+      this.pendingIceCandidates.delete(peerId);
+      this.makingOffers.delete(peerId);
+      this.ignoredOffers.delete(peerId);
       this.onPeerLeftCallback?.(peerId);
     });
   }
@@ -313,19 +355,35 @@ export class WebRTCManager {
 
   private async createOffer(targetPeerId: string) {
     const pc = await this.createPeerConnection(targetPeerId);
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    getSocket().emit('webrtc:offer', {
-      roomId: this.roomId,
-      senderId: this.currentUserId,
-      targetId: targetPeerId,
-      sdp: offer,
-    });
+    if (pc.signalingState !== 'stable' || this.makingOffers.has(targetPeerId)) return;
+    this.makingOffers.add(targetPeerId);
+    try {
+      const offer = await pc.createOffer();
+      if (pc.signalingState !== 'stable') return;
+      await pc.setLocalDescription(offer);
+      getSocket().emit('webrtc:offer', {
+        roomId: this.roomId,
+        senderId: this.currentUserId,
+        targetId: targetPeerId,
+        sdp: offer,
+      });
+    } finally {
+      this.makingOffers.delete(targetPeerId);
+    }
   }
 
   private async handleOffer(senderId: string, sdp: RTCSessionDescriptionInit) {
     const pc = await this.createPeerConnection(senderId);
+    const collision = this.makingOffers.has(senderId) || pc.signalingState !== 'stable';
+    const polite = this.currentUserId.localeCompare(senderId) > 0;
+    if (collision && !polite) {
+      this.ignoredOffers.add(senderId);
+      return;
+    }
+    this.ignoredOffers.delete(senderId);
+    if (collision && pc.signalingState === 'have-local-offer') {
+      await pc.setLocalDescription({ type: 'rollback' });
+    }
     await pc.setRemoteDescription(new RTCSessionDescription(sdp));
     await this.addPendingIceCandidates(senderId, pc);
     const answer = await pc.createAnswer();
@@ -341,7 +399,8 @@ export class WebRTCManager {
 
   private async handleAnswer(senderId: string, sdp: RTCSessionDescriptionInit) {
     const pc = this.peerConnections.get(senderId);
-    if (pc) {
+    if (pc?.signalingState === 'have-local-offer') {
+      this.ignoredOffers.delete(senderId);
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
       await this.addPendingIceCandidates(senderId, pc);
     }

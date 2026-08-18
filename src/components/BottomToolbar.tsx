@@ -1,61 +1,36 @@
 import React, { useState } from 'react';
 import { PresenceStatus } from '../types';
-import { Mic, MicOff, Camera, CameraOff, Monitor, Smile, Hand, Database, Image as ImageIcon, Sparkles, Volume2 } from 'lucide-react';
+import { BriefcaseBusiness, CalendarDays, Camera, CameraOff, CircleDotDashed, CirclePlay, LibraryBig, Mic, MicOff, Monitor, RadioTower, Smile, Sparkles, Video } from 'lucide-react';
 
 interface BottomToolbarProps {
   currentPresence?: PresenceStatus;
   onUpdateStatus: (updates: Partial<PresenceStatus>) => void;
   onSendGlobalReaction: (emoji: string) => void;
-  onOpenSchemaModal: () => void;
-  selectedBackground: string;
-  onSelectBackground: (bgUrl: string) => void;
-  canInspectSchema?: boolean;
+  onOpenShelf: () => void;
+  shelfOpen?: boolean;
+  shelfLabel?: string;
+  canShareScreen?: boolean;
+  onOpenCalendar: () => void;
+  onOpenStories: () => void;
+  calendarOpen?: boolean;
+  storiesOpen?: boolean;
 }
-
-export const BACKGROUND_PRESETS = [
-  {
-    id: 'bg-dark',
-    name: 'Midnight Black',
-    url: 'none',
-    preview: 'bg-[#0C0C0E]',
-  },
-  {
-    id: 'bg-loft',
-    name: 'Industrial Loft',
-    url: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=1200',
-    preview: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=150',
-  },
-  {
-    id: 'bg-neon',
-    name: 'Cyberpunk Studio',
-    url: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=1200',
-    preview: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&q=80&w=150',
-  },
-  {
-    id: 'bg-sunset',
-    name: 'Golden Sunset Penthouse',
-    url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&q=80&w=1200',
-    preview: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&q=80&w=150',
-  },
-  {
-    id: 'bg-[#0D0D12]',
-    name: 'Minimal Dark Zinc',
-    url: 'none-zinc',
-    preview: 'bg-[#15151c]',
-  },
-];
 
 export const BottomToolbar: React.FC<BottomToolbarProps> = ({
   currentPresence,
   onUpdateStatus,
   onSendGlobalReaction,
-  onOpenSchemaModal,
-  selectedBackground,
-  onSelectBackground,
-  canInspectSchema = false,
+  onOpenShelf,
+  shelfOpen = false,
+  shelfLabel = 'Open my shelf',
+  canShareScreen = false,
+  onOpenCalendar,
+  onOpenStories,
+  calendarOpen = false,
+  storiesOpen = false,
 }) => {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
-  const [bgStripOpen, setBgStripOpen] = useState(false);
+  const [utilityNotice, setUtilityNotice] = useState('');
 
   const isMuted = currentPresence?.isMuted ?? false;
   const isCameraOn = currentPresence?.isCameraOn ?? false;
@@ -64,67 +39,70 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
   const toggleMic = () => onUpdateStatus({ isMuted: !isMuted });
   const toggleCamera = () => onUpdateStatus({ isCameraOn: !isCameraOn });
   const toggleScreen = () => onUpdateStatus({ isSharingScreen: !isSharingScreen });
+  const futureTools = [
+    { label: 'Focus spaces', icon: CircleDotDashed },
+    { label: 'Office effects', icon: Sparkles },
+    { label: 'Recordings', icon: Video },
+    { label: 'Workspace tools', icon: BriefcaseBusiness },
+    { label: 'Broadcasts', icon: RadioTower },
+  ];
+  const showUtilityNotice = (label: string) => {
+    setUtilityNotice(`${label} · coming soon`);
+    window.setTimeout(() => setUtilityNotice(''), 1800);
+  };
 
   return (
-    <footer id="bottom-toolbar-container" className="h-20 bg-[#0C0C0E] border-t border-[#2D2D30] px-6 md:px-8 flex items-center justify-between sticky bottom-0 z-40 select-none shrink-0">
-      {/* Left: Database Schema Button */}
-      <div className="flex items-center space-x-2">
-        {canInspectSchema && <button
-          id="btn-bottom-schema"
-          onClick={onOpenSchemaModal}
-          className="flex items-center space-x-2 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-xl border border-zinc-800 text-xs font-medium transition"
-          title="Inspect PostgreSQL DDL & Live Data Schema"
-        >
-          <Database className="w-4 h-4 text-amber-400" />
-          <span className="hidden sm:inline">PostgreSQL DDL</span>
-        </button>}
+    <footer id="bottom-toolbar-container" className="relative h-16 shrink-0 select-none border-t border-white/[.055] bg-[#08090b]/96 px-3 backdrop-blur-2xl md:px-4">
+      <div className="absolute left-15 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-[16px] border border-white/[.08] bg-[#15161b]/96 p-1 shadow-[0_15px_45px_rgba(0,0,0,.35)] max-sm:-top-10 max-sm:translate-y-0">
+        <button type="button" onClick={onOpenStories} aria-label="Open stories" title="Stories" className={`flex h-8 w-8 items-center justify-center rounded-xl transition ${storiesOpen ? 'bg-pink-400/10 text-pink-300' : 'text-zinc-500 hover:bg-white/[.06] hover:text-white'}`}><CirclePlay className="h-4 w-4" /></button>
+        <button type="button" onClick={onOpenCalendar} aria-label="Open calendar" title="Calendar" className={`flex h-8 w-8 items-center justify-center rounded-xl transition ${calendarOpen ? 'bg-amber-300/10 text-amber-300' : 'text-zinc-500 hover:bg-white/[.06] hover:text-white'}`}><CalendarDays className="h-4 w-4" /></button>
       </div>
 
       {/* Center Controls: Mic, Camera, Reaction, Screen Share */}
-      <div className="flex items-center space-x-2 md:space-x-3 bg-[#1A1A1C] border border-[#2D2D30] p-2 rounded-2xl shadow-xl">
+      <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center space-x-1 rounded-[18px] border border-white/[.09] bg-[#15161b]/96 p-1 shadow-[0_15px_45px_rgba(0,0,0,.42)]">
         {/* Mic Toggle */}
         <button
           id="btn-toggle-mic"
           onClick={toggleMic}
-          className={`w-10 h-10 rounded-xl flex items-center justify-center transition border ${
+          className={`w-9 h-9 rounded-xl flex items-center justify-center transition border ${
             isMuted
               ? 'bg-red-500/20 text-red-400 border-red-500/40 hover:bg-red-500/30'
               : 'bg-[#1A1A1C] text-[#E0E0E0] border-[#2D2D30] hover:bg-[#242427]'
           }`}
           title={isMuted ? 'Unmute Microphone' : 'Mute Microphone'}
         >
-          {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          {isMuted ? <MicOff className="w-4.5 h-4.5" /> : <Mic className="w-4.5 h-4.5" />}
         </button>
 
         {/* Camera Toggle */}
         <button
           id="btn-toggle-camera"
           onClick={toggleCamera}
-          className={`w-10 h-10 rounded-xl flex items-center justify-center transition border ${
+          className={`w-9 h-9 rounded-xl flex items-center justify-center transition border ${
             !isCameraOn
               ? 'bg-[#1A1A1C] text-gray-500 border-[#2D2D30] hover:bg-[#242427]'
               : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/30'
           }`}
           title={isCameraOn ? 'Turn Camera Off' : 'Turn Camera On'}
         >
-          {!isCameraOn ? <CameraOff className="w-5 h-5" /> : <Camera className="w-5 h-5" />}
+          {!isCameraOn ? <CameraOff className="w-4.5 h-4.5" /> : <Camera className="w-4.5 h-4.5" />}
         </button>
 
         <div className="h-6 w-[1px] bg-[#2D2D30] mx-1"></div>
 
         {/* Screen Share Toggle */}
-        <button
+        {canShareScreen && <button
           id="btn-toggle-screenshare"
           onClick={toggleScreen}
-          className={`w-10 h-10 rounded-xl flex items-center justify-center transition border ${
+          className={`w-9 h-9 rounded-xl flex items-center justify-center transition border ${
             isSharingScreen
               ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 animate-pulse'
               : 'bg-[#1A1A1C] text-[#E0E0E0] border-[#2D2D30] hover:bg-[#242427]'
           }`}
           title={isSharingScreen ? 'Stop Screen Share' : 'Share Screen'}
         >
-          <Monitor className="w-5 h-5" />
-        </button>
+          <Monitor className="w-4.5 h-4.5" />
+        </button>}
 
         {/* Emoji Reaction Trigger */}
         <div className="relative">
@@ -132,12 +110,11 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
             id="btn-emoji-picker-toggle"
             onClick={() => {
               setEmojiPickerOpen(!emojiPickerOpen);
-              setBgStripOpen(false);
             }}
-            className="w-10 h-10 rounded-xl bg-[#1A1A1C] border border-[#2D2D30] flex items-center justify-center hover:bg-[#242427] text-[#D9A34A] transition"
+            className="w-9 h-9 rounded-xl bg-[#1A1A1C] border border-[#2D2D30] flex items-center justify-center hover:bg-[#242427] text-[#D9A34A] transition"
             title="Send Floating Emoji Reaction"
           >
-            <Smile className="w-5 h-5" />
+            <Smile className="w-4.5 h-4.5" />
           </button>
 
           {emojiPickerOpen && (
@@ -160,51 +137,20 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
         </div>
       </div>
 
-      {/* Right: Background / Wallpaper Thumbnails Strip */}
-      <div className="flex items-center space-x-2">
+      {/* Right: compact utility dock and shelf */}
+      <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-0.5 rounded-[18px] border border-white/[.09] bg-[#15161b]/96 p-1 shadow-[0_15px_45px_rgba(0,0,0,.42)]">
+        {utilityNotice && <span role="status" className="absolute bottom-12 right-0 whitespace-nowrap rounded-xl border border-white/[.09] bg-[#17181d]/98 px-3 py-2 text-[10px] text-zinc-300 shadow-xl">{utilityNotice}</span>}
+        {futureTools.map(({ label, icon: Icon }, index) => <button key={label} type="button" onClick={() => showUtilityNotice(label)} aria-label={label} title={`${label} · coming soon`} className={`h-8 w-8 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[.06] hover:text-zinc-200 ${index < 2 ? 'hidden md:flex' : 'hidden lg:flex'}`}><Icon className="h-4 w-4" /></button>)}
         <button
-          id="btn-toggle-bg-strip"
-          onClick={() => {
-            setBgStripOpen(!bgStripOpen);
-            setEmojiPickerOpen(false);
-          }}
-          className="flex items-center space-x-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 px-3 py-1.5 rounded-xl text-xs font-medium transition"
-          title="Switch Office Ambiance Wallpaper"
+          id="btn-toggle-shelf"
+          onClick={() => { onOpenShelf(); setEmojiPickerOpen(false); }}
+          aria-expanded={shelfOpen}
+          className={`flex h-8 w-8 items-center justify-center rounded-xl transition ${shelfOpen ? 'bg-amber-300/10 text-amber-300 shadow-[0_0_24px_rgba(252,211,77,.12)]' : 'text-zinc-500 hover:bg-white/[.06] hover:text-zinc-200'}`}
+          title={shelfLabel}
         >
-          <ImageIcon className="w-4 h-4 text-amber-400" />
-          <span className="hidden md:inline">Ambiance</span>
+          <LibraryBig className="w-4 h-4" />
+          <span className="sr-only">{shelfLabel}</span>
         </button>
-
-        {bgStripOpen && (
-          <div className="absolute bottom-14 right-4 bg-[#141418] border border-zinc-800 rounded-2xl shadow-2xl p-3 flex items-center space-x-3 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
-            <span className="text-xs font-bold text-zinc-400 uppercase text-[10px] tracking-wider whitespace-nowrap">
-              Office Ambiance
-            </span>
-            <div className="flex items-center space-x-2 overflow-x-auto max-w-xs md:max-w-md py-1">
-              {BACKGROUND_PRESETS.map((bg) => (
-                <button
-                  key={bg.id}
-                  onClick={() => {
-                    onSelectBackground(bg.url);
-                    setBgStripOpen(false);
-                  }}
-                  className={`relative w-12 h-10 rounded-lg overflow-hidden border-2 transition-all flex-shrink-0 ${
-                    selectedBackground === bg.url
-                      ? 'border-amber-400 ring-2 ring-amber-400/50 scale-105'
-                      : 'border-zinc-800 opacity-70 hover:opacity-100 hover:border-zinc-700'
-                  }`}
-                  title={bg.name}
-                >
-                  {bg.url.startsWith('http') ? (
-                    <img src={bg.preview} alt={bg.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className={`w-full h-full ${bg.preview}`}></div>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </footer>
   );

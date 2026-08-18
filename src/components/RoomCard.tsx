@@ -1,6 +1,6 @@
 import React from 'react';
 import { Room, User, PresenceStatus, ReactionEvent, GameLeaderboardItem } from '../types';
-import { Video, Tv, Gamepad2, Users, Radio, Sparkles, Mic, MicOff, Camera, Trophy, ChevronRight, MessageSquare } from 'lucide-react';
+import { Video, Tv, Gamepad2, Users, Sparkles, Mic, MicOff, Camera, Trophy, DoorOpen, Hand, Volume2 } from 'lucide-react';
 
 interface RoomCardProps {
   room: Room;
@@ -16,6 +16,8 @@ interface RoomCardProps {
   localMediaStream?: MediaStream | null;
   remoteStreams?: Record<string, MediaStream>;
   speakingUsers?: Record<string, boolean>;
+  owner?: User;
+  onKnock?: (userId: string) => void;
 }
 
 export const RoomCard: React.FC<RoomCardProps> = ({
@@ -32,9 +34,57 @@ export const RoomCard: React.FC<RoomCardProps> = ({
   localMediaStream,
   remoteStreams = {},
   speakingUsers = {},
+  owner,
+  onKnock,
 }) => {
   // Filter reactions for this room
   const roomReactions = activeReactions.filter((r) => r.roomId === room.id || !r.roomId);
+
+  if (room.type === 'personal') {
+    const officeOwner = owner || occupants.find((user) => user.id === room.ownerUserId);
+    const ownerPresence = officeOwner ? presences[officeOwner.id] : undefined;
+    const ownerIsHere = ownerPresence?.currentRoomId === room.id;
+    const ownerIsSpeaking = Boolean(officeOwner && speakingUsers[officeOwner.id]);
+    const visitors = occupants.filter((user) => user.id !== officeOwner?.id);
+    const isOwnOffice = room.ownerUserId === currentUser.id;
+
+    return (
+      <article
+        id={`room-card-${room.id}`}
+        className={`relative min-h-44 rounded-2xl border p-4 overflow-hidden transition-all duration-200 flex flex-col justify-between ${ownerIsSpeaking ? 'border-amber-400 ring-2 ring-amber-400/60 shadow-[0_0_28px_rgba(217,163,74,.3)] bg-[#211E18]' : ownerIsHere ? 'border-violet-500/60 shadow-[0_0_22px_rgba(139,92,246,.18)] bg-[#1D1B24]' : 'border-[#2D2D30] bg-[#1A1A1C] hover:border-zinc-600'}`}
+        data-speaking={ownerIsSpeaking ? 'true' : 'false'}
+      >
+        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_80%_0%,rgba(217,163,74,.08),transparent_45%)]" />
+        <div className="relative flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-white truncate">{room.name}</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">Personal office</p>
+          </div>
+          <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${ownerIsHere ? 'border-violet-500/40 bg-violet-500/10 text-violet-300' : 'border-zinc-800 bg-zinc-900 text-zinc-500'}`}>
+            <DoorOpen className="w-4 h-4" />
+          </div>
+        </div>
+
+        <div className="relative flex items-end justify-between gap-3 my-4">
+          <div className="flex items-end -space-x-2">
+            {officeOwner && <div className="relative z-10"><img src={officeOwner.avatarUrl} alt={officeOwner.name} className={`w-14 h-14 rounded-full object-cover bg-zinc-900 transition ${ownerIsSpeaking ? 'ring-4 ring-amber-400' : ownerIsHere ? 'ring-3 ring-violet-500/70' : 'ring-2 ring-zinc-700'}`} />{ownerIsSpeaking && <span className="absolute -right-1 -bottom-1 w-5 h-5 rounded-full bg-amber-400 text-black flex items-center justify-center border-2 border-[#1A1A1C]"><Volume2 className="w-3 h-3" /></span>}</div>}
+            {visitors.slice(0, 3).map((visitor) => <img key={visitor.id} src={visitor.avatarUrl} alt={visitor.name} title={visitor.name} className="w-9 h-9 rounded-full object-cover ring-2 ring-[#1A1A1C] bg-zinc-900" />)}
+          </div>
+          <div className="text-right"><p className={`text-[10px] font-bold uppercase ${ownerIsHere ? 'text-emerald-400' : 'text-zinc-600'}`}>{ownerIsHere ? 'In office' : 'Away'}</p>{visitors.length > 0 && <p className="text-[10px] text-zinc-500 mt-1">+{visitors.length} guest{visitors.length === 1 ? '' : 's'}</p>}</div>
+        </div>
+
+        <div className="relative border-t border-zinc-800/80 pt-3">
+          {isCurrentUserInRoom ? (
+            <button onClick={onLeaveRoom} className="w-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 rounded-xl py-2 text-xs font-semibold">Leave office</button>
+          ) : isOwnOffice ? (
+            <button id={`btn-join-room-${room.id}`} onClick={() => onJoinRoom(room.id)} className="w-full bg-amber-500 hover:bg-amber-400 text-black rounded-xl py-2 text-xs font-bold">Enter my office</button>
+          ) : (
+            <button onClick={() => officeOwner && onKnock?.(officeOwner.id)} disabled={!officeOwner || ownerPresence?.status === 'offline'} className="w-full bg-violet-500/10 hover:bg-violet-500/20 disabled:opacity-40 disabled:cursor-not-allowed border border-violet-500/30 text-violet-200 rounded-xl py-2 text-xs font-semibold flex items-center justify-center gap-1.5"><Hand className="w-3.5 h-3.5" />Knock</button>
+          )}
+        </div>
+      </article>
+    );
+  }
 
   // Variant 1: MEETING ROOM
   if (room.type === 'meeting') {
@@ -58,7 +108,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
                   <h2 className="text-base font-bold text-white tracking-tight">{room.name}</h2>
                   <span className="flex items-center space-x-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping"></span>
-                    <span>WebRTC Active</span>
+                    <span>{room.isPersonal ? 'Personal Office' : 'WebRTC Active'}</span>
                   </span>
                 </div>
                 <p className="text-xs text-zinc-400">{room.description}</p>
@@ -150,7 +200,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({
             {occupants.length === 0 && (
               <div className="col-span-full py-8 text-center text-zinc-500 text-xs border border-dashed border-zinc-800 rounded-xl flex flex-col items-center justify-center">
                 <Video className="w-8 h-8 text-zinc-700 mb-2" />
-                <p>No teammates in the Executive Meeting Room yet.</p>
+                <p>No teammates in {room.name} yet.</p>
                 <p className="text-[11px] text-zinc-600 mt-1">Click join below to initiate WebRTC video call.</p>
               </div>
             )}
