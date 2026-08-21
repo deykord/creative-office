@@ -100,24 +100,6 @@ function playTap(ctx: AudioContext, time: number, freq: number, duration: number
   osc.stop(time + duration);
 }
 
-/**
- * Plays a soft, warm rising dual-tone chime when a teammate changes status
- */
-export function playStatusChangeSound() {
-  if (isAudioMuted) return;
-  try {
-    const ctx = getAudioContext();
-    const now = ctx.currentTime;
-
-    // Tone 1: E5 (659.25 Hz)
-    playChimeTone(ctx, now, 659.25, 0.12);
-    // Tone 2: G#5 (830.61 Hz)
-    playChimeTone(ctx, now + 0.08, 830.61, 0.18);
-  } catch (err) {
-    console.warn('Audio play failed:', err);
-  }
-}
-
 /** Plays a short, unobtrusive two-note alert for an incoming chat message. */
 export function playMessageNotificationSound() {
   if (isAudioMuted) return;

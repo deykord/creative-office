@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { PresenceStatus, ReactionEvent, KnockEvent, UserStatusType } from '../types';
+import { PresenceStatus, ReactionEvent, KnockEvent } from '../types';
 
 let socket: Socket | null = null;
 let rtcIceServers: RTCIceServer[] = [
@@ -41,8 +41,8 @@ export function updateUserStatus(userId: string, updates: Partial<PresenceStatus
   s.emit('user:update_status', { userId, updates });
 }
 
-export function setIdleStateSocket(state: 'afk' | 'offline' | 'active', restoreStatus?: UserStatusType) {
-  getSocket().emit('presence:idle_state', { state, restoreStatus });
+export function setIdleStateSocket(state: 'afk' | 'offline' | 'active') {
+  getSocket().emit('presence:idle_state', { state });
 }
 
 export function joinRoomSocket(roomId: string, userId: string) {
@@ -83,6 +83,10 @@ export function sendReactionSocket(userId: string, emoji: string, roomId?: strin
 
 export function setHandRaisedSocket(raised: boolean) {
   getSocket().emit('hand:update', { raised });
+}
+
+export function setSpeakingSocket(speaking: boolean) {
+  getSocket().emit('voice:speaking', { speaking });
 }
 
 // WEBRTC PEER CONNECTION MANAGER FOR MEETING ROOM AND THEATER

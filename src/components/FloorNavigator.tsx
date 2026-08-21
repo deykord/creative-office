@@ -8,12 +8,13 @@ interface Props {
   users: User[];
   presences: Record<string, PresenceStatus>;
   roomOccupancyMap: Record<string, string[]>;
+  speakingUsers: Record<string, boolean>;
   activeFloorId: string;
   onSelectFloor: (floorId: string) => void;
   onUserMenu: (user: User, event: React.MouseEvent) => void;
 }
 
-export const FloorNavigator: React.FC<Props> = ({ floors, rooms, users, presences, roomOccupancyMap, activeFloorId, onSelectFloor, onUserMenu }) => {
+export const FloorNavigator: React.FC<Props> = ({ floors, rooms, users, presences, roomOccupancyMap, speakingUsers, activeFloorId, onSelectFloor, onUserMenu }) => {
   const userById = new Map<string, User>(users.map((user) => [user.id, user]));
   const sharedRoomOrder: Record<string, number> = { theater: 0, meeting: 1, game: 2 };
   const roomOrder = (left: Room, right: Room) => {
@@ -37,10 +38,11 @@ export const FloorNavigator: React.FC<Props> = ({ floors, rooms, users, presence
         const personalFloorRooms = floorRooms.filter((room) => room.type === 'personal');
         const sharedFloorRooms = floorRooms.filter((room) => room.type !== 'personal');
         const renderMiniRoom = (room: Room, shared: boolean) => {
-          const occupants = (roomOccupancyMap[room.id] || []).map((id) => userById.get(id)).filter(Boolean) as User[];
+          const occupants = (roomOccupancyMap[room.id] || []).map((id) => userById.get(id)).filter((user): user is User => Boolean(user && presences[user.id]?.status !== 'offline'));
+          const speaking = occupants.some((user) => speakingUsers[user.id]);
           const vipOffice = room.type === 'personal' && userById.get(room.ownerUserId || '')?.username === 'admin';
-          return <span key={room.id} title={room.name} data-mini-room-type={room.type} data-vip-office={vipOffice ? 'true' : undefined} className={`relative flex items-center overflow-hidden rounded-md border px-1.5 ${shared ? 'col-span-2 h-[44px]' : 'col-span-1 h-[34px]'} ${vipOffice ? 'border-amber-300/45 bg-amber-300/[.09] shadow-[inset_0_0_16px_rgba(251,191,36,.08)]' : 'border-white/[.045] bg-[#232429]'}`}>
-            <span className="flex -space-x-1.5">{occupants.slice(0, 4).map((user) => <span key={user.id} role="button" tabIndex={0} title={`Open ${user.name} actions`} onClick={(event) => { event.stopPropagation(); onUserMenu(user, event); }} className="rounded-full focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-300"><img src={user.avatarUrl} alt="" className={`h-5 w-5 rounded-full object-cover ring-1 ring-[#222328] ${presences[user.id]?.status === 'offline' ? 'opacity-40 grayscale' : ''}`} /></span>)}</span>
+          return <span key={room.id} title={room.name} data-mini-room-type={room.type} data-vip-office={vipOffice ? 'true' : undefined} data-speaking={speaking ? 'true' : 'false'} className={`relative flex items-center overflow-hidden rounded-md border px-1.5 ${shared ? 'col-span-2 h-[44px]' : 'col-span-1 h-[34px]'} ${vipOffice ? 'border-amber-300/45 bg-amber-300/[.09] shadow-[inset_0_0_16px_rgba(251,191,36,.08)]' : 'border-white/[.045] bg-[#232429]'}`}>
+            <span className="flex -space-x-1.5">{occupants.slice(0, 4).map((user) => <span key={user.id} role="button" tabIndex={0} title={`Open ${user.name} actions`} onClick={(event) => { event.stopPropagation(); onUserMenu(user, event); }} data-speaking={speakingUsers[user.id] ? 'true' : 'false'} className={`rounded-full focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-300 ${speakingUsers[user.id] ? 'relative z-10' : ''}`}><img src={user.avatarUrl} alt="" className={`h-5 w-5 rounded-full object-cover transition-all duration-150 ${speakingUsers[user.id] ? 'opacity-100 ring-1 ring-cyan-300 shadow-[0_0_8px_rgba(103,232,249,.3)]' : 'opacity-60 ring-1 ring-[#222328]'}`} /></span>)}</span>
             {vipOffice && <Crown className="absolute right-1 top-1 h-2.5 w-2.5 fill-amber-300/20 text-amber-300" />}
             {occupants.length > 4 && <span className="ml-1 text-[7px] text-zinc-500">+{occupants.length - 4}</span>}
           </span>;

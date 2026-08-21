@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { User, PresenceStatus } from '../types';
-import { X, User as UserIcon, Music, Sparkles, Save, Check } from 'lucide-react';
+import { User } from '../types';
+import { X, Save, Check, LogOut } from 'lucide-react';
 import { useFloatingWindow, WindowResizeHandles } from '../hooks/useFloatingWindow';
 
 interface ProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: User;
-  currentPresence?: PresenceStatus;
-  onSave: (updates: { customStatus?: string; currentMusic?: string; role?: string; name?: string; bio?: string; gender?: 'male' | 'female'; avatarUrl?: string }) => void | Promise<void>;
+  onSave: (updates: { role?: string; name?: string; bio?: string; gender?: 'male' | 'female'; avatarUrl?: string }) => void | Promise<void>;
+  onLogout: () => void | Promise<void>;
 }
 
 const defaultProfileBounds = () => {
@@ -21,11 +21,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   isOpen,
   onClose,
   currentUser,
-  currentPresence,
   onSave,
+  onLogout,
 }) => {
-  const [customStatus, setCustomStatus] = useState(currentPresence?.customStatus || '');
-  const [currentMusic, setCurrentMusic] = useState(currentPresence?.currentMusic || '');
   const [role, setRole] = useState(currentUser.role || '');
   const [name, setName] = useState(currentUser.name || '');
   const [bio, setBio] = useState(currentUser.bio || '');
@@ -38,15 +36,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    setCustomStatus(currentPresence?.customStatus || '');
-    setCurrentMusic(currentPresence?.currentMusic || '');
     setRole(currentUser.role || '');
     setName(currentUser.name || '');
     setBio(currentUser.bio || '');
     setGender(currentUser.gender || 'male');
     setAvatarUrl(currentUser.avatarUrl || '');
     setError('');
-  }, [isOpen, currentUser.role, currentPresence?.customStatus, currentPresence?.currentMusic]);
+  }, [isOpen, currentUser.role, currentUser.name, currentUser.bio, currentUser.gender, currentUser.avatarUrl]);
 
   if (!isOpen) return null;
 
@@ -55,7 +51,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     setSubmitting(true);
     setError('');
     try {
-      await onSave({ customStatus, currentMusic, role, name, bio, gender, avatarUrl });
+      await onSave({ role, name, bio, gender, avatarUrl });
       setSaved(true);
       setTimeout(() => { setSaved(false); onClose(); }, 600);
     } catch (saveError) {
@@ -76,7 +72,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             />
             <div>
               <h3 className="text-base font-bold text-white">{currentUser.name}</h3>
-              <p className="text-xs text-zinc-400">Edit Profile & Presence Badges</p>
+              <p className="text-xs text-zinc-400">Profile settings</p>
             </div>
           </div>
 
@@ -102,35 +98,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-zinc-300 mb-1">
-              Custom Status Message
-            </label>
-            <input
-              type="text"
-              value={customStatus}
-              onChange={(e) => setCustomStatus(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
-              placeholder="e.g. Reviewing UI Figma specs"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-zinc-300 mb-1 flex items-center space-x-1">
-              <Music className="w-3.5 h-3.5 text-pink-400" />
-              <span>Currently Listening To</span>
-            </label>
-            <input
-              type="text"
-              value={currentMusic}
-              onChange={(e) => setCurrentMusic(e.target.value)}
-              className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
-              placeholder="e.g. Lofi Beats - Ambient Focus"
-            />
-          </div>
-
-          <div className="pt-3 border-t border-zinc-800 flex items-center justify-end space-x-2">
+          <div className="pt-3 border-t border-zinc-800 flex items-center gap-2">
             {error && <p className="mr-auto text-xs text-red-300">{error}</p>}
+            {!error && <button type="button" onClick={onLogout} className="mr-auto flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-red-300 transition hover:bg-red-500/10"><LogOut className="h-3.5 w-3.5" />Sign out</button>}
             <button
               type="button"
               onClick={onClose}
@@ -144,7 +114,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 text-black font-bold px-5 py-2 rounded-xl text-xs flex items-center space-x-1.5 shadow-lg shadow-amber-500/20"
             >
               {saved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-              <span>{saved ? 'Saved!' : 'Save Presence'}</span>
+              <span>{saved ? 'Saved!' : 'Save profile'}</span>
             </button>
           </div>
         </form>

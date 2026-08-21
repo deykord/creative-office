@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Floor, GameLeaderboardItem, KnockEvent, PresenceStatus, ReactionEvent, Room, RoomInviteEvent, Team, User, UserStatusType } from './types';
-import { cancelKnockSocket, disconnectSocket, getSocket, joinRoomSocket, kickUserFromRoomSocket, leaveRoomSocket, respondKnockSocket, sendKnockSocket, sendReactionSocket, sendRoomInviteSocket, setHandRaisedSocket, setIdleStateSocket, setRtcIceServers, updateUserStatus, WebRTCManager } from './lib/socket';
+import { Floor, GameLeaderboardItem, KnockEvent, PresenceStatus, ReactionEvent, Room, RoomInviteEvent, Team, User } from './types';
+import { cancelKnockSocket, disconnectSocket, getSocket, joinRoomSocket, kickUserFromRoomSocket, leaveRoomSocket, respondKnockSocket, sendKnockSocket, sendReactionSocket, sendRoomInviteSocket, setHandRaisedSocket, setIdleStateSocket, setRtcIceServers, setSpeakingSocket, updateUserStatus, WebRTCManager } from './lib/socket';
 import { TopBar } from './components/TopBar';
 import { BottomToolbar } from './components/BottomToolbar';
 import { KnockModal } from './components/KnockModal';
@@ -8,7 +8,7 @@ import { ExpandedRoomModal } from './components/ExpandedRoomModal';
 import { ProfileModal } from './components/ProfileModal';
 import { LoginPage } from './components/LoginPage';
 import { UserManagementModal } from './components/UserManagementModal';
-import { playStatusChangeSound, startKnockRinging, stopKnockRinging } from './lib/audio';
+import { startKnockRinging, stopKnockRinging } from './lib/audio';
 import { useVoiceActivity } from './hooks/useVoiceActivity';
 import { OfficeWelcomeModal } from './components/OfficeWelcomeModal';
 import { OfficeFloor } from './components/OfficeFloor';
@@ -24,17 +24,10 @@ import { StoriesWindow } from './components/StoriesWindow';
 import { RoomInviteModal } from './components/RoomInviteModal';
 import { RegistrationPage } from './components/RegistrationPage';
 
-const preferredStatusKey = (userId: string) => `creative-office-preferred-status:${userId}`;
-const validPreferredStatuses: UserStatusType[] = ['online', 'in_call', 'focusing', 'listening_music', 'away'];
 const officeTabId = crypto.randomUUID();
 const officeTabOpenedAt = Date.now();
 const officeTabStorageKey = 'creative-office-active-tab';
 type OfficeTabClaim = { type: 'claim'; tabId: string; userId: string; openedAt: number };
-const getPreferredStatus = (userId: string): UserStatusType | null => {
-  const saved = window.localStorage.getItem(preferredStatusKey(userId)) as UserStatusType | null;
-  return saved && validPreferredStatuses.includes(saved) ? saved : null;
-};
-
 export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [sessionNotice, setSessionNotice] = useState('');
@@ -61,6 +54,7 @@ export default function App() {
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [mediaError, setMediaError] = useState('');
   const [raisedHands, setRaisedHands] = useState<Record<string, boolean>>({});
+  const [officeSpeakingUsers, setOfficeSpeakingUsers] = useState<Record<string, boolean>>({});
   const [introBusy, setIntroBusy] = useState(false);
   const [introError, setIntroError] = useState('');
   const [pendingMeetingRoom, setPendingMeetingRoom] = useState<Room | null>(null);
@@ -71,8 +65,8 @@ export default function App() {
   const [preJoinCameraOn, setPreJoinCameraOn] = useState(false);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState('');
-  const [selectedVideoDeviceId, setSelectedVideoDeviceId] = useState('');
+  const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState(() => window.localStorage.getItem('creative-office-audio-input') || '');
+  const [selectedVideoDeviceId, setSelectedVideoDeviceId] = useState(() => window.localStorage.getItem('creative-office-video-input') || '');
   const [chatWindowOpen, setChatWindowOpen] = useState(false);
   const [calendarWindowOpen, setCalendarWindowOpen] = useState(false);
   const [storiesWindowOpen, setStoriesWindowOpen] = useState(false);
@@ -111,6 +105,7 @@ export default function App() {
       setPresences(data.presences || {});
       setRoomOccupancyMap(data.roomOccupancy || {});
       setLeaderboard(data.leaderboard || []);
+      setOfficeSpeakingUsers(Object.fromEntries((data.speakingUserIds || []).map((userId: string) => [userId, true])));
     };
     const onInit = (data: any) => applyLiveState(data);
     const onSessionReplaced = ({ message }: { message?: string } = {}) => {
@@ -136,7 +131,6 @@ export default function App() {
     const onVisibilityChange = () => { if (document.visibilityState === 'visible') void refreshLiveState(); };
     const onPresence = (presence: PresenceStatus) => {
       setPresences((previous) => {
-        if (presence.userId !== currentUser.id && previous[presence.userId]?.status !== presence.status) playStatusChangeSound();
         return { ...previous, [presence.userId]: presence };
       });
     };
@@ -157,6 +151,12 @@ export default function App() {
     };
     const onReaction = (reaction: ReactionEvent) => setActiveReactions((previous) => [...previous.slice(-15), reaction]);
     const onHandUpdated = ({ userId, raised }: { userId: string; raised: boolean }) => setRaisedHands((previous) => ({ ...previous, [userId]: raised }));
+    const onSpeakingUpdated = ({ userId, speaking }: { userId: string; speaking: boolean }) => setOfficeSpeakingUsers((previous) => {
+      if (speaking) return { ...previous, [userId]: true };
+      const next = { ...previous };
+      delete next[userId];
+      return next;
+    });
     socket.on('presence:init', onInit);
     socket.on('connect', onConnect);
     socket.on('connect_error', onConnectError);
@@ -177,6 +177,7 @@ export default function App() {
     const onFloorsUpdated = (updatedFloors: Floor[]) => { setFloors(updatedFloors); setActiveFloorId((previous) => updatedFloors.some((floor) => floor.id === previous) ? previous : currentUser.defaultFloorId || updatedFloors[0]?.id || ''); };
     socket.on('floors:updated', onFloorsUpdated);
     socket.on('hand:updated', onHandUpdated);
+    socket.on('voice:speaking', onSpeakingUpdated);
     socket.on('knock:responded', onKnockResponded);
     socket.on('knock:expired', onKnockExpired);
     socket.on('room:kicked', onRoomKicked);
@@ -199,6 +200,7 @@ export default function App() {
       socket.off('rooms:updated', onRoomsUpdated);
       socket.off('floors:updated', onFloorsUpdated);
       socket.off('hand:updated', onHandUpdated);
+      socket.off('voice:speaking', onSpeakingUpdated);
       socket.off('knock:responded', onKnockResponded);
       socket.off('knock:expired', onKnockExpired);
       socket.off('room:kicked', onRoomKicked);
@@ -269,12 +271,18 @@ export default function App() {
     joinRoomRef.current(personalOffice.id);
   }, [currentUser?.id, rooms]);
 
-  const speakingUsers = useVoiceActivity({
+  const locallyDetectedSpeakingUsers = useVoiceActivity({
     enabled: Boolean(activeMediaRoom),
     localUserId: currentUser?.id,
     localStream: localMediaStream,
     remoteStreams,
   });
+  const speakingUsers = { ...officeSpeakingUsers, ...locallyDetectedSpeakingUsers };
+
+  useEffect(() => {
+    if (!currentUser) return;
+    setSpeakingSocket(Boolean(locallyDetectedSpeakingUsers[currentUser.id]));
+  }, [currentUser?.id, Boolean(currentUser && locallyDetectedSpeakingUsers[currentUser.id])]);
 
   if (authLoading) {
     return <div className="min-h-screen bg-[#0C0C0E] flex items-center justify-center"><div className="w-8 h-8 rounded-full border-2 border-zinc-800 border-t-[#D9A34A] animate-spin" /></div>;
@@ -319,8 +327,8 @@ export default function App() {
     const cameras = devices.filter((device) => device.kind === 'videoinput');
     setAudioDevices(microphones);
     setVideoDevices(cameras);
-    setSelectedAudioDeviceId((current) => current || microphones[0]?.deviceId || '');
-    setSelectedVideoDeviceId((current) => current || cameras[0]?.deviceId || '');
+    setSelectedAudioDeviceId((current) => microphones.some((device) => device.deviceId === current) ? current : microphones[0]?.deviceId || '');
+    setSelectedVideoDeviceId((current) => cameras.some((device) => device.deviceId === current) ? current : cameras[0]?.deviceId || '');
   };
   const updateStatus = (updates: Partial<PresenceStatus>) => {
     const manager = webrtcManagerRef.current;
@@ -386,10 +394,6 @@ export default function App() {
     updateLocalPresence(updates);
     updateUserStatus(currentUser.id, updates);
   };
-  const updateManualStatus = (updates: Partial<PresenceStatus>) => {
-    if (updates.status && validPreferredStatuses.includes(updates.status)) window.localStorage.setItem(preferredStatusKey(currentUser.id), updates.status);
-    updateStatus(updates);
-  };
   const sendReaction = (emoji: string, roomId?: string) => sendReactionSocket(currentUser.id, emoji, roomId);
 
   const joinRoom = async (roomId: string, approvedStream?: MediaStream) => {
@@ -401,9 +405,7 @@ export default function App() {
     const usesMedia = room.type === 'personal' || room.type === 'meeting' || room.type === 'theater';
     setActiveMediaRoom(usesMedia ? room : null);
     setExpandedRoom(room.type === 'personal' ? null : room);
-    const preferredStatus = getPreferredStatus(currentUser.id);
-    const roomStatus = preferredStatus || 'in_call';
-    updateLocalPresence({ currentRoomId: roomId, status: roomStatus });
+    updateLocalPresence({ currentRoomId: roomId, status: 'online' });
     if (usesMedia) {
       const manager = new WebRTCManager(
         (peerId, stream) => setRemoteStreams((previous) => ({ ...previous, [peerId]: stream })),
@@ -432,7 +434,6 @@ export default function App() {
       }
       manager.announceMediaReady();
     } else joinRoomSocket(roomId, currentUser.id);
-    updateStatus({ status: roomStatus });
   };
   joinRoomRef.current = joinRoom;
 
@@ -479,7 +480,13 @@ export default function App() {
   };
 
   const selectPreJoinDevice = async (kind: 'audio' | 'video', deviceId: string) => {
-    if (kind === 'audio') setSelectedAudioDeviceId(deviceId); else setSelectedVideoDeviceId(deviceId);
+    if (kind === 'audio') {
+      setSelectedAudioDeviceId(deviceId);
+      window.localStorage.setItem('creative-office-audio-input', deviceId);
+    } else {
+      setSelectedVideoDeviceId(deviceId);
+      window.localStorage.setItem('creative-office-video-input', deviceId);
+    }
     const enabled = kind === 'audio' ? preJoinMicOn : preJoinCameraOn;
     if (!enabled) return;
     setMeetingConsentBusy(true);
@@ -497,9 +504,15 @@ export default function App() {
 
   const selectActiveDevice = async (kind: 'audio' | 'video', deviceId: string) => {
     const manager = webrtcManagerRef.current;
-    if (!manager) return;
+    if (kind === 'audio') {
+      setSelectedAudioDeviceId(deviceId);
+      window.localStorage.setItem('creative-office-audio-input', deviceId);
+    } else {
+      setSelectedVideoDeviceId(deviceId);
+      window.localStorage.setItem('creative-office-video-input', deviceId);
+    }
+    if (!manager || (kind === 'audio' && currentPresence?.isMuted) || (kind === 'video' && !currentPresence?.isCameraOn)) return;
     try {
-      if (kind === 'audio') setSelectedAudioDeviceId(deviceId); else setSelectedVideoDeviceId(deviceId);
       const stream = kind === 'audio' ? await manager.setAudioDevice(deviceId) : await manager.setVideoDevice(deviceId);
       setLocalMediaStream(stream);
       updateLocalPresence(kind === 'audio' ? { isMuted: false } : { isCameraOn: true });
@@ -552,13 +565,11 @@ export default function App() {
     setRaisedHands((previous) => ({ ...previous, [currentUser.id]: false }));
     setHandRaisedSocket(false);
     setMediaError('');
-    const preferredStatus = getPreferredStatus(currentUser.id) || 'online';
-    updateLocalPresence({ status: preferredStatus, currentRoomId: null, isMuted: false, isCameraOn: false, isSharingScreen: false });
-    updateUserStatus(currentUser.id, { status: preferredStatus, isMuted: false, isCameraOn: false, isSharingScreen: false });
+    updateLocalPresence({ status: 'online', currentRoomId: null, isMuted: false, isCameraOn: false, isSharingScreen: false });
+    updateUserStatus(currentUser.id, { status: 'online', isMuted: false, isCameraOn: false, isSharingScreen: false });
   };
 
   const markAfk = () => {
-    updateLocalPresence({ status: 'away', customStatus: 'AFK' });
     setIdleStateSocket('afk');
   };
 
@@ -580,15 +591,13 @@ export default function App() {
     setExpandedRoom(null);
     setRaisedHands((previous) => ({ ...previous, [currentUser.id]: false }));
     setMediaError('');
-    updateLocalPresence({ status: 'offline', customStatus: 'AFK', currentRoomId: null, isMuted: false, isCameraOn: false, isSharingScreen: false });
+    updateLocalPresence({ status: 'offline', currentRoomId: null, isMuted: false, isCameraOn: false, isSharingScreen: false });
     setIdleStateSocket('offline');
   };
 
-  const restoreFromInactivity = (wasOffline: boolean, previousStatus: UserStatusType) => {
-    const preferredStatus = getPreferredStatus(currentUser.id);
-    const restoredStatus = preferredStatus || (previousStatus === 'away' || previousStatus === 'offline' ? 'online' : previousStatus);
-    updateLocalPresence({ status: restoredStatus, customStatus: undefined });
-    setIdleStateSocket('active', restoredStatus);
+  const restoreFromInactivity = (wasOffline: boolean) => {
+    updateLocalPresence({ status: 'online' });
+    setIdleStateSocket('active');
     if (wasOffline) {
       const personalOffice = roomsRef.current.find((room) => room.ownerUserId === currentUser.id);
       if (personalOffice) window.setTimeout(() => void joinRoomRef.current(personalOffice.id), 0);
@@ -606,13 +615,12 @@ export default function App() {
     setPresences({});
   };
 
-  const saveProfile = async ({ customStatus, currentMusic, role, name, bio, gender, avatarUrl }: { customStatus?: string; currentMusic?: string; role?: string; name?: string; bio?: string; gender?: 'male' | 'female'; avatarUrl?: string }) => {
+  const saveProfile = async ({ role, name, bio, gender, avatarUrl }: { role?: string; name?: string; bio?: string; gender?: 'male' | 'female'; avatarUrl?: string }) => {
     const response = await fetch('/api/me', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role, name, bio, gender, avatarUrl }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Profile update failed.');
     setCurrentUser(data.user);
     setUsers((previous) => previous.map((user) => user.id === data.user.id ? data.user : user));
-    updateStatus({ customStatus, currentMusic });
   };
 
   const acknowledgeOfficeIntro = async () => {
@@ -661,7 +669,7 @@ export default function App() {
 
   return (
     <div className="m-1 h-[calc(100dvh-8px)] bg-[#08090b] text-zinc-100 flex flex-col relative overflow-hidden rounded-[20px] border border-white/[.1] shadow-[0_35px_120px_rgba(0,0,0,.7)] sm:m-2 sm:h-[calc(100dvh-16px)] sm:rounded-[28px]" style={{ backgroundImage: 'radial-gradient(circle at 50% -25%,rgba(116,89,47,.12),transparent 35%)' }}>
-      <TopBar currentUser={currentUser} currentPresence={currentPresence} allPresences={presences} onUpdateStatus={updateManualStatus} onOpenProfileModal={() => setIsProfileModalOpen(true)} onOpenUserManagement={() => setIsUserManagementOpen(true)} onLogout={logout} />
+      <TopBar />
       {mediaError && !expandedRoom && <div role="status" className="fixed right-2 top-[6.6rem] z-50 max-w-[180px] rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] leading-4 text-red-200 shadow-2xl backdrop-blur-xl sm:left-1/2 sm:right-auto sm:top-20 sm:max-w-lg sm:-translate-x-1/2 sm:px-4 sm:py-3 sm:text-sm">{mediaError}</div>}
       <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">{activeReactions.map((reaction) => <div key={reaction.id} className="absolute animate-float-up text-3xl" style={{ left: `${10 + Math.random() * 80}%`, bottom: '12%' }}>{reaction.emoji}</div>)}</div>
 
@@ -669,13 +677,13 @@ export default function App() {
         <nav aria-label="Switch office floor" className="md:hidden h-10 shrink-0 border-b border-white/[.06] bg-[#0a0b0e]/96 px-1.5 py-1 flex items-center gap-1 overflow-x-auto">
           {floors.map((floor) => <button key={floor.id} type="button" aria-current={floor.id === activeFloor?.id ? 'page' : undefined} onClick={() => setActiveFloorId(floor.id)} className={`h-8 shrink-0 rounded-lg border px-2.5 text-[10px] font-semibold transition ${floor.id === activeFloor?.id ? 'border-amber-300/30 bg-amber-300/10 text-amber-200' : 'border-white/[.07] bg-white/[.025] text-zinc-500'}`}><span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: floor.color }} />{floor.name}</button>)}
         </nav>
-        {activeFloor && <OfficeFloor floor={activeFloor} rooms={visibleRooms} users={users} presences={presences} roomOccupancyMap={roomOccupancyMap} currentUser={currentUser} currentRoomId={currentPresence?.currentRoomId} speakingUsers={speakingUsers} onJoinRoom={requestRoomJoin} onLeaveRoom={leaveRoom} onKnock={knockOnUser} onUserMenu={(user, event) => setUserMenu({ user, x: event.clientX, y: event.clientY })} />}
+        {activeFloor && <OfficeFloor floor={activeFloor} rooms={visibleRooms} users={users} presences={presences} roomOccupancyMap={roomOccupancyMap} currentUser={currentUser} currentRoomId={currentPresence?.currentRoomId} speakingUsers={speakingUsers} onJoinRoom={requestRoomJoin} onLeaveRoom={leaveRoom} onKnock={knockOnUser} onUserMenu={(user, event) => { if (user.id === currentUser.id) { setUserMenu(null); setIsProfileModalOpen(true); } else setUserMenu({ user, x: event.clientX, y: event.clientY }); }} />}
         <aside aria-label="Office floors" className="relative hidden md:flex md:w-[280px] lg:w-[330px] shrink-0 border-l border-white/[.075] bg-[#0a0b0e]/97 flex-col overflow-hidden">
-          <div className="min-h-0 flex-1"><FloorNavigator floors={floors} rooms={rooms} users={users} presences={presences} roomOccupancyMap={roomOccupancyMap} activeFloorId={activeFloor?.id || ''} onSelectFloor={setActiveFloorId} onUserMenu={(user, event) => setUserMenu({ user, x: event.clientX, y: event.clientY })} /></div>
+          <div className="min-h-0 flex-1"><FloorNavigator floors={floors} rooms={rooms} users={users} presences={presences} roomOccupancyMap={roomOccupancyMap} speakingUsers={speakingUsers} activeFloorId={activeFloor?.id || ''} onSelectFloor={setActiveFloorId} onUserMenu={(user, event) => { if (user.id === currentUser.id) { setUserMenu(null); setIsProfileModalOpen(true); } else setUserMenu({ user, x: event.clientX, y: event.clientY }); }} /></div>
         </aside>
       </div>
 
-      <BottomToolbar currentPresence={currentPresence} onUpdateStatus={updateStatus} onSendGlobalReaction={(emoji) => sendReaction(emoji)} onOpenShelf={() => setShelfWindowOpen((value) => !value)} shelfOpen={shelfWindowOpen} shelfLabel={`Open ${(activeMediaRoom?.type === 'personal' ? users.find((user) => user.id === activeMediaRoom.ownerUserId)?.name : currentUser.name) || currentUser.name}'s shelf`} canShareScreen={Boolean(activeMediaRoom && activeMediaRoom.type !== 'personal')} voiceOnly={activeMediaRoom?.type === 'personal'} onOpenCalendar={() => setCalendarWindowOpen((value) => !value)} onOpenStories={() => setStoriesWindowOpen((value) => !value)} calendarOpen={calendarWindowOpen} storiesOpen={storiesWindowOpen} />
+      <BottomToolbar currentPresence={currentPresence} onUpdateStatus={updateStatus} onSendGlobalReaction={(emoji) => sendReaction(emoji)} onOpenShelf={() => setShelfWindowOpen((value) => !value)} shelfOpen={shelfWindowOpen} shelfLabel={`Open ${(activeMediaRoom?.type === 'personal' ? users.find((user) => user.id === activeMediaRoom.ownerUserId)?.name : currentUser.name) || currentUser.name}'s shelf`} canShareScreen={Boolean(activeMediaRoom && activeMediaRoom.type !== 'personal')} voiceOnly={activeMediaRoom?.type === 'personal'} onOpenCalendar={() => setCalendarWindowOpen((value) => !value)} onOpenStories={() => setStoriesWindowOpen((value) => !value)} calendarOpen={calendarWindowOpen} storiesOpen={storiesWindowOpen} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectActiveDevice('audio', id)} onSelectVideoDevice={(id) => void selectActiveDevice('video', id)} isOwner={currentUser.isAdmin} ownerDashboardOpen={isUserManagementOpen} onOpenOwnerDashboard={() => setIsUserManagementOpen(true)} />
       {personalPresenter && personalPresentationStream && <PersonalOfficePresentation presenter={personalPresenter} stream={personalPresentationStream} isLocal={personalPresenter.id === currentUser.id} onStop={() => updateStatus({ isSharingScreen: false })} />}
       {activeMediaRoom?.type === 'personal' && (
         <div className="sr-only" aria-label="Personal office audio connections">
@@ -684,7 +692,7 @@ export default function App() {
       )}
       <ExpandedRoomModal isOpen={!!expandedRoom} onClose={leaveRoom} room={expandedRoom} users={users} presences={presences} currentUser={currentUser} currentPresence={currentPresence} activeReactions={activeReactions} onSendReaction={(emoji) => sendReaction(emoji, expandedRoom?.id)} onUpdateStatus={updateStatus} localMediaStream={localMediaStream} remoteStreams={remoteStreams} mediaError={mediaError} raisedHands={raisedHands} speakingUsers={speakingUsers} onHandRaised={(raised) => { setRaisedHands((previous) => ({ ...previous, [currentUser.id]: raised })); setHandRaisedSocket(raised); }} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectActiveDevice('audio', id)} onSelectVideoDevice={(id) => void selectActiveDevice('video', id)} />
       <KnockModal knock={incomingKnock} outgoingTargetUser={outgoingKnockUser} onAccept={() => { const personalOffice = rooms.find((room) => room.ownerUserId === currentUser.id); if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, true); if (personalOffice) joinRoom(personalOffice.id); setIncomingKnock(null); }} onDecline={() => { if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, false); setIncomingKnock(null); }} onCancelOutgoing={() => { if (outgoingKnockUser) cancelKnockSocket(outgoingKnockUser.id); setOutgoingKnockUser(null); }} />
-      <ProfileModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} currentUser={currentUser} currentPresence={currentPresence} onSave={saveProfile} />
+      <ProfileModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} currentUser={currentUser} onSave={saveProfile} onLogout={logout} />
       {currentUser.isAdmin && <UserManagementModal isOpen={isUserManagementOpen} onClose={() => setIsUserManagementOpen(false)} users={users} rooms={rooms} floors={floors} currentUser={currentUser} onUsersChanged={setUsers} onRoomsChanged={setRooms} onFloorsChanged={setFloors} />}
       {!currentUser.officeIntroSeen && <OfficeWelcomeModal user={currentUser} busy={introBusy} error={introError} onContinue={acknowledgeOfficeIntro} />}
       <MeetingPreJoinModal room={pendingMeetingRoom} busy={meetingConsentBusy} error={meetingConsentError} previewStream={preJoinStream} micOn={preJoinMicOn} cameraOn={preJoinCameraOn} onToggleMic={() => void togglePreJoinDevice('audio')} onToggleCamera={() => void togglePreJoinDevice('video')} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectPreJoinDevice('audio', id)} onSelectVideoDevice={(id) => void selectPreJoinDevice('video', id)} onCancel={() => { preJoinStream?.getTracks().forEach((track) => track.stop()); setPreJoinStream(null); setPendingMeetingRoom(null); setMeetingConsentError(''); }} onConfirm={confirmMeetingJoin} />
@@ -694,7 +702,7 @@ export default function App() {
       <ShelfWindow open={shelfWindowOpen} owner={(activeMediaRoom?.type === 'personal' && users.find((user) => user.id === activeMediaRoom.ownerUserId)) || currentUser} currentUser={currentUser} onClose={() => setShelfWindowOpen(false)} />
       <CalendarWindow open={calendarWindowOpen} onClose={() => setCalendarWindowOpen(false)} />
       <StoriesWindow open={storiesWindowOpen} currentUser={currentUser} onClose={() => setStoriesWindowOpen(false)} />
-      <InactivityMonitor currentStatus={currentPresence?.status} onAfk={markAfk} onOffline={pauseForInactivity} onRestore={restoreFromInactivity} />
+      <InactivityMonitor onAfk={markAfk} onOffline={pauseForInactivity} onRestore={restoreFromInactivity} />
     </div>
   );
 }

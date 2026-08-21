@@ -40,7 +40,7 @@ async function exitPersonalOffice(page) {
   await page.locator('#btn-toggle-mic[title="Mute Microphone"]').waitFor({ timeout: 5000 });
   await leaveOffice.click();
   await leaveOffice.waitFor({ state: 'detached' });
-  await page.getByRole('button', { name: /Online/ }).waitFor({ timeout: 5000 });
+  await page.getByRole('button', { name: 'Open account menu' }).waitFor({ timeout: 5000 });
   return showedWelcome;
 }
 
@@ -92,12 +92,11 @@ try {
     await exitPersonalOffice(page);
   });
 
-  await step('Top bar sound and presence status controls', async () => {
-    await page.getByTitle('Toggle sounds').click();
-    await page.getByRole('button', { name: /Online/ }).click();
-    await page.getByRole('button', { name: 'Away', exact: true }).click();
-    await page.getByRole('button', { name: /Away/ }).click();
-    await page.getByRole('button', { name: 'Online', exact: true }).click();
+  await step('Minimal top bar and theme control', async () => {
+    await page.getByTitle('Switch to light theme').click();
+    await page.getByTitle('Switch to dark theme').click();
+    assert(await page.getByTitle('Toggle sounds').count() === 0, 'Sound control remains in the top bar');
+    assert(await page.getByText('Deep focus', { exact: true }).count() === 0, 'Manual presence controls remain visible');
   });
 
   await step('Main floor and right-side floor navigator', async () => {
@@ -116,26 +115,14 @@ try {
     await page.getByTitle('Send 🔥').click();
   });
 
-  await step('Admin-only PostgreSQL explorer controls', async () => {
-    await page.locator('#btn-bottom-schema').click();
-    for (const label of ['users', 'teams', 'rooms', 'presence_status']) {
-      await page.getByRole('button', { name: new RegExp(`^${label}`) }).click();
-    }
-    await page.getByRole('button', { name: 'SQL DDL Script' }).click();
-    await page.getByRole('button', { name: 'Copy SQL' }).click();
-    await page.getByRole('button', { name: /Copied DDL|Copy failed/ }).waitFor();
-    await page.locator('.fixed.inset-0').getByRole('button').first().click();
-  });
-
   await step('Profile cancel and save controls', async () => {
     await page.getByRole('button', { name: 'Open account menu' }).click();
     await page.getByRole('button', { name: 'Edit profile' }).click();
     await page.getByRole('button', { name: 'Cancel' }).click();
     await page.getByRole('button', { name: 'Open account menu' }).click();
     await page.getByRole('button', { name: 'Edit profile' }).click();
-    await page.getByPlaceholder('e.g. Reviewing UI Figma specs').fill('Production UI audit');
-    await page.getByRole('button', { name: 'Save Presence' }).click();
-    await page.getByText('Edit Profile & Presence Badges').waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: 'Save profile' }).click();
+    await page.getByText('Profile settings').waitFor({ state: 'detached' });
   });
 
   await step('Owner analytics and account creation', async () => {

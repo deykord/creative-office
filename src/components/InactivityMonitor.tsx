@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Clock3, MousePointer2 } from 'lucide-react';
-import { UserStatusType } from '../types';
 
 type IdlePhase = 'active' | 'afk' | 'offline';
 
@@ -8,22 +7,18 @@ const AFK_AFTER_MS = 10 * 60 * 1000;
 const OFFLINE_AFTER_MS = 30 * 60 * 1000;
 
 interface Props {
-  currentStatus?: UserStatusType;
   onAfk: () => void;
   onOffline: () => void;
-  onRestore: (wasOffline: boolean, previousStatus: UserStatusType) => void;
+  onRestore: (wasOffline: boolean) => void;
 }
 
-export const InactivityMonitor: React.FC<Props> = ({ currentStatus, onAfk, onOffline, onRestore }) => {
+export const InactivityMonitor: React.FC<Props> = ({ onAfk, onOffline, onRestore }) => {
   const [phase, setPhase] = useState<IdlePhase>('active');
   const phaseRef = useRef<IdlePhase>('active');
   const lastActivityRef = useRef(Date.now());
   const lastPointerUpdateRef = useRef(0);
-  const previousStatusRef = useRef<UserStatusType>('online');
-  const statusRef = useRef(currentStatus);
   const callbacksRef = useRef({ onAfk, onOffline, onRestore });
 
-  statusRef.current = currentStatus;
   callbacksRef.current = { onAfk, onOffline, onRestore };
 
   useEffect(() => {
@@ -32,19 +27,12 @@ export const InactivityMonitor: React.FC<Props> = ({ currentStatus, onAfk, onOff
       setPhase(next);
     };
 
-    const rememberStatus = () => {
-      const status = statusRef.current;
-      if (status && status !== 'away' && status !== 'offline') previousStatusRef.current = status;
-    };
-
     const evaluate = () => {
       const elapsed = Date.now() - lastActivityRef.current;
       if (elapsed >= OFFLINE_AFTER_MS && phaseRef.current !== 'offline') {
-        if (phaseRef.current === 'active') rememberStatus();
         changePhase('offline');
         callbacksRef.current.onOffline();
       } else if (elapsed >= AFK_AFTER_MS && phaseRef.current === 'active') {
-        rememberStatus();
         changePhase('afk');
         callbacksRef.current.onAfk();
       }
@@ -61,7 +49,7 @@ export const InactivityMonitor: React.FC<Props> = ({ currentStatus, onAfk, onOff
       if (phaseRef.current !== 'active') {
         const wasOffline = phaseRef.current === 'offline';
         changePhase('active');
-        callbacksRef.current.onRestore(wasOffline, previousStatusRef.current);
+        callbacksRef.current.onRestore(wasOffline);
       }
     };
 

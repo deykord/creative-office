@@ -703,6 +703,7 @@ async function startServer() {
 
   const socketIdleStates = new Map<string, 'active' | 'afk' | 'offline'>();
   const mediaReadyByRoom = new Map<string, Set<string>>();
+  const speakingUserIds = new Set<string>();
   const pendingKnocks = new Map<string, { sentAt: number; timer: NodeJS.Timeout }>();
   const userEventQueues = new Map<string, Promise<void>>();
   const runSocket = (socket: Socket, action: () => Promise<void>) => {
@@ -723,7 +724,7 @@ async function startServer() {
     const [users, teams, rooms, floors, presences, roomOccupancy, leaderboard] = await Promise.all([
       db.getUsers(), db.getTeams(), db.getRooms(), db.getFloors(), db.getPresences(), db.getRoomOccupancyMap(), db.getLeaderboard(),
     ]);
-    return { users, teams, rooms, floors, presences, roomOccupancy, leaderboard };
+    return { users, teams, rooms, floors, presences, roomOccupancy, leaderboard, speakingUserIds: [...speakingUserIds] };
   }
 
   io.on('connection', (socket) => {
@@ -742,16 +743,15 @@ async function startServer() {
         socket.join(personalOffice.id);
         await db.joinRoom(personalOffice.id, user.id);
       }
-      const presence = await db.updatePresence(user.id, { status: personalOffice ? 'in_call' : 'online' });
+      const presence = await db.updatePresence(user.id, { status: 'online' });
       socket.emit('presence:init', await initialState());
       io.emit('presence:updated', presence);
       if (personalOffice) io.emit('room:occupancy_changed', { roomId: personalOffice.id, roomOccupancyMap: await db.getRoomOccupancyMap() });
     });
 
     socket.on('user:update_status', ({ updates } = {}) => runSocket(socket, async () => {
-      const allowed = ['status', 'isMuted', 'isCameraOn', 'isSharingScreen', 'currentMusic', 'customStatus'];
+      const allowed = ['isMuted', 'isCameraOn', 'isSharingScreen'];
       const clean = Object.fromEntries(Object.entries(updates || {}).filter(([key]) => allowed.includes(key)));
-      if (clean.status && !['online', 'in_call', 'focusing', 'listening_music', 'away'].includes(String(clean.status))) delete clean.status;
       const presence = (await db.getPresences())[user.id];
       const currentRoom = (await db.getRooms()).find((room) => room.id === presence?.currentRoomId);
       if (currentRoom?.type === 'personal') {
@@ -761,7 +761,7 @@ async function startServer() {
       io.emit('presence:updated', await db.updatePresence(user.id, clean));
     }));
 
-    socket.on('presence:idle_state', ({ state, restoreStatus } = {}) => runSocket(socket, async () => {
+    socket.on('presence:idle_state', ({ state } = {}) => runSocket(socket, async () => {
       if (!['active', 'afk', 'offline'].includes(String(state))) return;
       socketIdleStates.set(socket.id, state);
       const connectedSockets = [...(userSockets.get(user.id) || [])];
@@ -771,9 +771,6 @@ async function startServer() {
         : connectedStates.length > 0 && connectedStates.every((value) => value === 'offline') ? 'offline' : 'afk';
 
       if (aggregateState === 'active') {
-        const safeStatus = ['online', 'in_call', 'focusing', 'listening_music'].includes(String(restoreStatus))
-          ? restoreStatus
-          : 'online';
         await db.resumeActivitySession(user.id);
         let presence = (await db.getPresences())[user.id];
         if (!presence?.currentRoomId) {
@@ -781,14 +778,13 @@ async function startServer() {
           if (personalOffice) { socket.join(personalOffice.id); await db.joinRoom(personalOffice.id, user.id); }
           presence = (await db.getPresences())[user.id];
         }
-        io.emit('presence:updated', await db.updatePresence(user.id, { status: presence?.currentRoomId ? safeStatus : 'online', customStatus: undefined }));
+        io.emit('presence:updated', await db.updatePresence(user.id, { status: 'online' }));
         io.emit('room:occupancy_changed', { roomOccupancyMap: await db.getRoomOccupancyMap() });
         return;
       }
 
       await db.pauseActivitySession(user.id);
       if (aggregateState === 'afk') {
-        io.emit('presence:updated', await db.updatePresence(user.id, { status: 'away', customStatus: 'AFK' }));
         return;
       }
 
@@ -800,7 +796,7 @@ async function startServer() {
         io.emit('room:occupancy_changed', { roomId: previousRoomId, roomOccupancyMap: await db.getRoomOccupancyMap() });
       }
       io.emit('presence:updated', await db.updatePresence(user.id, {
-        status: 'offline', customStatus: 'AFK', currentRoomId: null,
+        status: 'offline', currentRoomId: null,
         isMuted: false, isCameraOn: false, isSharingScreen: false,
       }));
     }));
@@ -973,6 +969,16 @@ async function startServer() {
       io.emit('hand:updated', { userId: user.id, raised: Boolean(raised) });
     }));
 
+    socket.on('voice:speaking', ({ speaking } = {}) => runSocket(socket, async () => {
+      const presence = (await db.getPresences())[user.id];
+      const nextSpeaking = Boolean(speaking && presence?.currentRoomId && !presence.isMuted);
+      const wasSpeaking = speakingUserIds.has(user.id);
+      if (nextSpeaking === wasSpeaking) return;
+      if (nextSpeaking) speakingUserIds.add(user.id);
+      else speakingUserIds.delete(user.id);
+      io.emit('voice:speaking', { userId: user.id, speaking: nextSpeaking });
+    }));
+
     for (const event of ['webrtc:offer', 'webrtc:answer', 'webrtc:ice-candidate'] as const) {
       socket.on(event, (payload = {}) => {
         const outbound = { ...payload, senderId: user.id, socketId: socket.id };
@@ -985,6 +991,7 @@ async function startServer() {
 
     socket.on('disconnect', () => runSocket(socket, async () => {
       socketIdleStates.delete(socket.id);
+      if (speakingUserIds.delete(user.id)) io.emit('voice:speaking', { userId: user.id, speaking: false });
       const active = userSockets.get(user.id);
       active?.delete(socket.id);
       if (active?.size) return;

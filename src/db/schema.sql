@@ -112,8 +112,6 @@ CREATE TABLE IF NOT EXISTS presence_status (
   is_muted BOOLEAN NOT NULL DEFAULT false,
   is_camera_on BOOLEAN NOT NULL DEFAULT false,
   is_sharing_screen BOOLEAN NOT NULL DEFAULT false,
-  current_music TEXT,
-  custom_status TEXT,
   current_room_id VARCHAR(64) REFERENCES rooms(id) ON DELETE SET NULL,
   last_updated TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

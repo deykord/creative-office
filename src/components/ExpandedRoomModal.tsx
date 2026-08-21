@@ -251,9 +251,9 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
             </div>
             <div className="h-20 shrink-0 flex items-center justify-center gap-2 overflow-x-auto rounded-2xl border border-[#2D2D30] bg-[#151518] px-3">
               {displayParticipants.map((participant) => (
-                <div key={participant.id} data-speaking={speakingUsers[participant.id] ? 'true' : 'false'} className={`min-w-36 h-14 rounded-xl border px-2.5 flex items-center gap-2 transition ${speakingUsers[participant.id] ? 'border-amber-400 ring-2 ring-amber-400/40 bg-amber-500/10' : 'border-zinc-800 bg-zinc-900/80'}`}>
-                  <img src={participant.avatarUrl} alt={participant.name} className="w-9 h-9 rounded-full object-cover ring-2 ring-zinc-700" />
-                  <div className="min-w-0"><p className="text-xs font-semibold truncate">{participant.name}</p><p className={`text-[9px] uppercase font-bold ${speakingUsers[participant.id] ? 'text-amber-300' : presences[participant.id]?.isMuted ? 'text-red-400' : 'text-zinc-500'}`}>{speakingUsers[participant.id] ? 'Speaking' : presences[participant.id]?.isMuted ? 'Muted' : participant.id === presenter.id ? 'Presenting' : 'Listening'}</p></div>
+                <div key={participant.id} data-speaking={speakingUsers[participant.id] ? 'true' : 'false'} className="min-w-36 h-14 rounded-xl border border-zinc-800 bg-zinc-900/80 px-2.5 flex items-center gap-2 transition">
+                  <img src={participant.avatarUrl} alt={participant.name} className={`w-9 h-9 rounded-full object-cover transition-all duration-150 ${speakingUsers[participant.id] ? 'opacity-100 ring-1 ring-cyan-300 shadow-[0_0_10px_rgba(103,232,249,.28)]' : 'opacity-60 ring-1 ring-zinc-700'}`} />
+                  <div className="min-w-0"><p className="text-xs font-semibold truncate">{participant.name}</p><p className={`text-[9px] uppercase font-bold ${presences[participant.id]?.isMuted ? 'text-red-400' : 'text-zinc-500'}`}>{presences[participant.id]?.isMuted ? 'Muted' : participant.id === presenter.id ? 'Presenting' : ''}</p></div>
                 </div>
               ))}
             </div>
@@ -271,29 +271,19 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
               return (
                 <div
                   key={usr.id}
-                  className={`min-h-[210px] bg-[#191a1e] border rounded-[18px] overflow-hidden relative shadow-[0_18px_50px_rgba(0,0,0,.3)] flex items-center justify-center group transition-all duration-150 ${speakingUsers[usr.id] ? 'border-amber-300 ring-2 ring-amber-300/45 shadow-[0_0_32px_rgba(217,163,74,.2)]' : 'border-white/[.075]'}`}
+                  className={`min-h-[210px] bg-[#191a1e] border rounded-[18px] overflow-hidden relative shadow-[0_18px_50px_rgba(0,0,0,.3)] flex items-center justify-center group transition-all duration-150 ${speakingUsers[usr.id] && showVideo ? 'border-cyan-300/60' : 'border-white/[.075]'}`}
                   data-speaking={speakingUsers[usr.id] ? 'true' : 'false'}
                 >
                   {showVideo ? (
                     <StreamVideo stream={stream!} muted contain={Boolean(presence?.isSharingScreen)} />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-[#18191d]">
-                      <img src={usr.avatarUrl} alt={usr.name} className="w-24 h-24 md:w-28 md:h-28 rounded-full object-cover ring-4 ring-white/[.06] shadow-2xl" />
+                      <img src={usr.avatarUrl} alt={usr.name} className={`w-24 h-24 md:w-28 md:h-28 rounded-full object-cover shadow-2xl transition-all duration-150 ${speakingUsers[usr.id] ? 'opacity-100 ring-1 ring-cyan-300 shadow-[0_0_14px_rgba(103,232,249,.3)]' : 'opacity-60 ring-1 ring-white/[.06]'}`} />
                     </div>
                   )}
 
                   {presence?.isSharingScreen && <span className="absolute top-3 left-3 bg-blue-500/20 border border-blue-400/40 text-blue-200 text-[10px] font-bold uppercase px-2 py-1 rounded-lg">Presenting screen</span>}
                   {raisedHands[usr.id] && <span className="absolute top-11 left-3 bg-amber-500 text-black text-[10px] font-bold uppercase px-2 py-1 rounded-lg">✋ Hand raised</span>}
-
-                  {/* Top-right audio activity badge or video effect */}
-                  <div className="absolute top-3 right-3 flex items-center space-x-2">
-                    {speakingUsers[usr.id] && (
-                      <div className="bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-amber-500/30 flex items-center space-x-1.5 text-amber-400 text-xs font-bold">
-                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
-                        <span>Speaking</span>
-                      </div>
-                    )}
-                  </div>
 
                   {/* Bottom Participant Name Tag */}
                   <div className="absolute bottom-3 left-3 bg-black/65 backdrop-blur-md border border-white/[.1] px-3 py-1.5 rounded-xl flex items-center space-x-2">
@@ -320,13 +310,12 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
               {displayParticipants.slice(0, 3).map((usr) => (
                 <div
                   key={usr.id}
-                  className={`bg-[#1C1C20] border rounded-3xl overflow-hidden h-56 relative shadow-2xl flex items-center justify-center group transition-all duration-150 ${speakingUsers[usr.id] ? 'border-amber-400 ring-4 ring-amber-400/60 shadow-[0_0_38px_rgba(217,163,74,0.3)]' : 'border-[#2D2D30]'}`}
+                  className={`bg-[#1C1C20] border rounded-3xl overflow-hidden h-56 relative shadow-2xl flex items-center justify-center group transition-all duration-150 ${speakingUsers[usr.id] && (presences[usr.id]?.isCameraOn || presences[usr.id]?.isSharingScreen) ? 'border-cyan-300/60' : 'border-[#2D2D30]'}`}
                   data-speaking={speakingUsers[usr.id] ? 'true' : 'false'}
                 >
                   {(usr.id === currentUser.id ? localMediaStream : remoteStreams[usr.id]) && (presences[usr.id]?.isCameraOn || presences[usr.id]?.isSharingScreen) ? (
                     <StreamVideo stream={(usr.id === currentUser.id ? localMediaStream : remoteStreams[usr.id])!} muted contain={Boolean(presences[usr.id]?.isSharingScreen)} />
-                  ) : <img src={usr.avatarUrl} alt={usr.name} className="w-28 h-28 rounded-full object-cover ring-4 ring-zinc-800" />}
-                  {speakingUsers[usr.id] && <span className="absolute top-3 right-3 bg-black/70 border border-amber-400/50 text-amber-300 text-[10px] font-bold uppercase px-2.5 py-1 rounded-full"><span className="inline-block w-1.5 h-1.5 mr-1.5 rounded-full bg-amber-400 animate-pulse" />Speaking</span>}
+                  ) : <img src={usr.avatarUrl} alt={usr.name} className={`w-28 h-28 rounded-full object-cover transition-all duration-150 ${speakingUsers[usr.id] ? 'opacity-100 ring-1 ring-cyan-300 shadow-[0_0_14px_rgba(103,232,249,.3)]' : 'opacity-60 ring-1 ring-zinc-800'}`} />}
                   <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md border border-[#3A3A40] px-4 py-1.5 rounded-2xl">
                     <span className="text-xs font-bold text-white tracking-wide">
                       {usr.name}
@@ -351,7 +340,7 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
                       <img
                         src={participant.avatarUrl}
                         alt={participant.name}
-                        className="w-6 h-6 rounded-full object-cover ring-1 ring-zinc-700"
+                        className={`w-6 h-6 rounded-full object-cover transition-all duration-150 ${speakingUsers[participant.id] ? 'opacity-100 ring-1 ring-cyan-300' : 'opacity-60 ring-1 ring-zinc-700'}`}
                       />
                     </div>
                   );
@@ -377,7 +366,7 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
                     <img
                       src={u.avatarUrl}
                       alt={u.name}
-                      className="w-14 h-14 rounded-full border-2 border-[#D9A34A] object-cover shadow-lg"
+                      className={`w-14 h-14 rounded-full object-cover shadow-lg transition-all duration-150 ${speakingUsers[u.id] ? 'opacity-100 ring-1 ring-cyan-300' : 'opacity-60 ring-1 ring-white/[.08]'}`}
                     />
                     <span className="text-xs font-bold text-white mt-2">{u.name}</span>
                   </div>

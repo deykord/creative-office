@@ -84,6 +84,7 @@ class OfficeDatabase {
   async initialize(): Promise<void> {
     const ddl = this.getSqlDDL();
     await pool.query(ddl);
+    await pool.query('ALTER TABLE presence_status DROP COLUMN IF EXISTS current_music, DROP COLUMN IF EXISTS custom_status');
     const { rows: floorRows } = await pool.query('SELECT id FROM floors ORDER BY sort_order, created_at LIMIT 1');
     const mainFloorId = floorRows[0].id;
     await pool.query('UPDATE users SET default_floor_id=$1 WHERE default_floor_id IS NULL', [mainFloorId]);
@@ -596,12 +597,10 @@ class OfficeDatabase {
     const { rows } = await pool.query('SELECT * FROM presence_status');
     return Object.fromEntries(rows.map((row) => [row.user_id, {
       userId: row.user_id,
-      status: row.status,
+      status: row.status === 'offline' ? 'offline' : 'online',
       isMuted: row.is_muted,
       isCameraOn: row.is_camera_on,
       isSharingScreen: row.is_sharing_screen,
-      currentMusic: row.current_music || undefined,
-      customStatus: row.custom_status || undefined,
       currentRoomId: row.current_room_id,
       lastUpdated: new Date(row.last_updated).toISOString(),
     }]));
@@ -619,15 +618,15 @@ class OfficeDatabase {
     const next = { ...current, ...updates, userId };
     const { rows } = await pool.query(
       `INSERT INTO presence_status
-        (user_id, status, is_muted, is_camera_on, is_sharing_screen, current_music, custom_status, current_room_id, last_updated)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+        (user_id, status, is_muted, is_camera_on, is_sharing_screen, current_room_id, last_updated)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW())
        ON CONFLICT (user_id) DO UPDATE SET
         status=EXCLUDED.status, is_muted=EXCLUDED.is_muted, is_camera_on=EXCLUDED.is_camera_on,
-        is_sharing_screen=EXCLUDED.is_sharing_screen, current_music=EXCLUDED.current_music,
-        custom_status=EXCLUDED.custom_status, current_room_id=EXCLUDED.current_room_id, last_updated=NOW()
+        is_sharing_screen=EXCLUDED.is_sharing_screen,
+        current_room_id=EXCLUDED.current_room_id, last_updated=NOW()
        RETURNING *`,
       [userId, next.status, next.isMuted, next.isCameraOn, next.isSharingScreen,
-        next.currentMusic || null, next.customStatus || null, next.currentRoomId || null],
+        next.currentRoomId || null],
     );
     if (current.status !== next.status) {
       await pool.query(
@@ -652,7 +651,6 @@ class OfficeDatabase {
     return {
       userId: row.user_id, status: row.status, isMuted: row.is_muted,
       isCameraOn: row.is_camera_on, isSharingScreen: row.is_sharing_screen,
-      currentMusic: row.current_music || undefined, customStatus: row.custom_status || undefined,
       currentRoomId: row.current_room_id, lastUpdated: new Date(row.last_updated).toISOString(),
     };
   }
@@ -667,12 +665,12 @@ class OfficeDatabase {
       await client.query('INSERT INTO room_sessions (user_id, room_id) VALUES ($1, $2)', [userId, roomId]);
       await client.query(
         `INSERT INTO activity_events (user_id, event_type, status, room_id, details)
-         VALUES ($1, 'room_join', 'in_call', $2, $3::jsonb)`,
+         VALUES ($1, 'room_join', 'online', $2, $3::jsonb)`,
         [userId, roomId, JSON.stringify({ previousRoomId: previous.rows[0]?.room_id || null })],
       );
       return { previousRoomId: previous.rows[0]?.room_id || null, previousDurationSeconds: closed.rows[0]?.duration_seconds || 0 };
     });
-    await this.updatePresence(userId, { currentRoomId: roomId, status: 'in_call' });
+    await this.updatePresence(userId, { currentRoomId: roomId, status: 'online' });
     const occupancy = await this.getRoomOccupancyMap();
     return { roomId, occupants: occupancy[roomId] || [], ...movement };
   }

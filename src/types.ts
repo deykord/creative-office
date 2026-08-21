@@ -1,4 +1,4 @@
-export type UserStatusType = 'online' | 'in_call' | 'focusing' | 'away' | 'listening_music' | 'offline';
+export type UserStatusType = 'online' | 'offline';
 
 export interface User {
   id: string;
@@ -57,8 +57,6 @@ export interface PresenceStatus {
   isMuted: boolean;
   isCameraOn: boolean;
   isSharingScreen: boolean;
-  currentMusic?: string;
-  customStatus?: string;
   currentRoomId?: string | null;
   lastUpdated: string;
 }
