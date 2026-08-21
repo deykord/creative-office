@@ -17,7 +17,7 @@ export const KnockModal: React.FC<KnockModalProps> = ({
   onDecline,
   onCancelOutgoing,
 }) => {
-  // Outgoing knocking dialog matching Screenshot 4
+  // Outgoing knock has a server-enforced 30 second timeout.
   if (outgoingTargetUser) {
     return (
       <div className="fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -29,6 +29,8 @@ export const KnockModal: React.FC<KnockModalProps> = ({
           <h3 className="text-lg font-bold text-white mb-6">
             Knocking on {outgoingTargetUser.name.split(' ')[0]}'s Door...
           </h3>
+
+          <p className="-mt-3 mb-5 text-xs text-zinc-500">Waiting for an answer · ends automatically after 30 seconds</p>
 
           <button
             onClick={onCancelOutgoing}

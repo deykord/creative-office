@@ -64,8 +64,16 @@ export function respondKnockSocket(toUserId: string, accepted: boolean) {
   getSocket().emit('knock:respond', { toUserId, accepted });
 }
 
+export function cancelKnockSocket(toUserId: string) {
+  getSocket().emit('knock:cancel', { toUserId });
+}
+
 export function sendRoomInviteSocket(toUserId: string) {
   getSocket().emit('room:invite', { toUserId });
+}
+
+export function kickUserFromRoomSocket(targetUserId: string) {
+  getSocket().emit('room:kick', { targetUserId });
 }
 
 export function sendReactionSocket(userId: string, emoji: string, roomId?: string) {
@@ -231,6 +239,14 @@ export class WebRTCManager {
     if (this.currentUserId) {
       leaveRoomSocket(this.currentUserId);
     }
+    this.releaseResources();
+  }
+
+  public suspendForTabTakeover() {
+    this.releaseResources();
+  }
+
+  private releaseResources() {
     this.peerConnections.forEach((pc) => pc.close());
     this.peerConnections.clear();
     this.mediaSenders.clear();
@@ -250,6 +266,8 @@ export class WebRTCManager {
     socket.off('webrtc:answer');
     socket.off('webrtc:ice-candidate');
     socket.off('webrtc:peer-left');
+    this.roomId = '';
+    this.currentUserId = '';
   }
 
   private setupSignalingListeners() {

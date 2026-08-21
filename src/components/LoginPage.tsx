@@ -4,9 +4,10 @@ import { User } from '../types';
 
 interface LoginPageProps {
   onAuthenticated: (user: User) => void;
+  notice?: string;
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated, notice }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -61,6 +62,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
             <p className="text-sm text-zinc-600 mt-2 mb-5 sm:mb-8">Use the workspace account created by your owner.</p>
 
             <form onSubmit={submit} className="space-y-4">
+              {notice && <p role="status" className="rounded-xl border border-amber-400/25 bg-amber-300/[.08] px-3 py-2.5 text-xs text-amber-700 dark:text-amber-200">{notice}</p>}
               <label className="block"><span className="text-[11px] font-medium text-zinc-500">Username</span><div className="relative mt-2"><UserRound className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-700" /><input required minLength={3} maxLength={32} autoComplete="username" autoFocus value={username} onChange={(event) => setUsername(event.target.value)} className="w-full bg-[#0a0b0e] border border-white/[.08] rounded-xl pl-11 pr-4 py-3.5 text-sm outline-none focus:border-amber-200/45 focus:ring-4 focus:ring-amber-200/[.035] transition placeholder:text-zinc-800" placeholder="your.username" /></div></label>
               <label className="block"><span className="text-[11px] font-medium text-zinc-500">Password</span><div className="relative mt-2"><LockKeyhole className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-700" /><input required maxLength={128} type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="w-full bg-[#0a0b0e] border border-white/[.08] rounded-xl pl-11 pr-12 py-3.5 text-sm outline-none focus:border-amber-200/45 focus:ring-4 focus:ring-amber-200/[.035] transition placeholder:text-zinc-800" placeholder="Your password" /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-zinc-700 hover:text-zinc-300">{showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div></label>
               {error && <p role="alert" className="text-xs text-red-300 bg-red-400/[.07] border border-red-400/20 rounded-xl px-3 py-2.5">{error}</p>}

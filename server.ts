@@ -151,6 +151,7 @@ async function startServer() {
 
   const server = http.createServer(app);
   const io = new SocketIOServer(server, { maxHttpBufferSize: 6_000_000 });
+  const userSockets = new Map<string, Set<string>>();
   const emitChat = async (conversationId: string, event: string, payload: unknown) => {
     for (const memberId of await db.getConversationMemberIds(conversationId)) io.to(`chat:user:${memberId}`).emit(event, payload);
   };
@@ -180,10 +181,55 @@ async function startServer() {
     }
     loginAttempts.delete(req.ip || 'unknown');
     await createSession(req, res, user);
+    for (const socketId of userSockets.get(user.id) || []) {
+      const existingSocket = io.sockets.sockets.get(socketId);
+      existingSocket?.emit('auth:session_replaced', { message: 'Your account was signed in on another device.' });
+      if (existingSocket) setTimeout(() => existingSocket.disconnect(true), 150);
+    }
     res.json({ user: safeUser(user) });
   }));
 
+  app.get('/api/invitations/:token', asyncRoute(async (req, res) => {
+    const invitation = await db.getOfficeInvitation(tokenHash(req.params.token));
+    if (!invitation) { res.status(404).json({ error: 'This invitation is invalid or has expired.' }); return; }
+    res.json({ invitation: { email: invitation.email, role: invitation.role, gender: invitation.gender, expiresAt: invitation.expires_at } });
+  }));
+
+  app.post('/api/invitations/:token/register', asyncRoute(async (req, res) => {
+    const invitation = await db.getOfficeInvitation(tokenHash(req.params.token));
+    if (!invitation) { res.status(404).json({ error: 'This invitation is invalid or has expired.' }); return; }
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    const name = String(req.body?.name || '').trim();
+    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username) || password.length < 10 || password.length > 128 || name.length < 2 || name.length > 120) { res.status(400).json({ error: 'Enter a valid name, username, and password of at least 10 characters.' }); return; }
+    try {
+      const user = await db.createUser({ id: crypto.randomUUID(), username, passwordHash: await hashPassword(password), name, email: invitation.email, role: invitation.role, defaultFloorId: invitation.default_floor_id, gender: invitation.gender });
+      await db.acceptOfficeInvitation(invitation.id);
+      await createSession(req, res, user);
+      io.emit('users:updated', await db.getUsers()); io.emit('rooms:updated', await db.getRooms());
+      res.status(201).json({ user: safeUser(user) });
+    } catch (error: any) {
+      if (error?.code === '23505') { res.status(409).json({ error: 'That username or email is already registered.' }); return; }
+      throw error;
+    }
+  }));
+
   app.use('/api', authenticate);
+
+  app.post('/api/admin/invitations', requireAdmin, asyncRoute(async (req, res) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const role = String(req.body?.role || 'Member').trim();
+    const gender = req.body?.gender === 'female' ? 'female' : 'male';
+    const defaultFloorId = String(req.body?.defaultFloorId || '');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || role.length > 120 || !(await db.getFloors()).some((floor) => floor.id === defaultFloorId)) { res.status(400).json({ error: 'Enter a valid email, role, and floor.' }); return; }
+    const rawToken = crypto.randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await db.createOfficeInvitation({ id: crypto.randomUUID(), email, tokenHash: tokenHash(rawToken), role, gender, defaultFloorId, invitedBy: req.user!.id, expiresAt });
+    const registrationUrl = `${process.env.APP_URL || `${req.protocol}://${req.get('host')}`}/register?token=${encodeURIComponent(rawToken)}`;
+    const subject = 'Join Creativeprocess Office';
+    const body = `You have been invited to Creativeprocess Office. Register here: ${registrationUrl}\n\nThis link expires in 7 days.`;
+    res.status(201).json({ invitation: { email, expiresAt, registrationUrl, mailtoUrl: `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}` } });
+  }));
 
   app.post('/api/auth/logout', asyncRoute(async (req, res) => {
     if (req.sessionHash) await db.deleteSession(req.sessionHash);
@@ -636,7 +682,7 @@ async function startServer() {
     res.json({ iceServers: [
       { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
       {
-        urls: ['turn:91-107-242-1.sslip.io:3478?transport=udp', 'turn:91-107-242-1.sslip.io:3478?transport=tcp'],
+        urls: ['turn:office.creativeprocess.io:3478?transport=udp', 'turn:office.creativeprocess.io:3478?transport=tcp'],
         username,
         credential,
       },
@@ -655,7 +701,6 @@ async function startServer() {
     }
   });
 
-  const userSockets = new Map<string, Set<string>>();
   const socketIdleStates = new Map<string, 'active' | 'afk' | 'offline'>();
   const mediaReadyByRoom = new Map<string, Set<string>>();
   const pendingKnocks = new Map<string, { sentAt: number; timer: NodeJS.Timeout }>();
@@ -692,15 +737,27 @@ async function startServer() {
 
     runSocket(socket, async () => {
       if (isFirstConnection) await db.startActivitySession(user.id);
-      const presence = await db.updatePresence(user.id, { status: 'online' });
+      const personalOffice = isFirstConnection ? await db.getPersonalRoom(user.id) : undefined;
+      if (personalOffice) {
+        socket.join(personalOffice.id);
+        await db.joinRoom(personalOffice.id, user.id);
+      }
+      const presence = await db.updatePresence(user.id, { status: personalOffice ? 'in_call' : 'online' });
       socket.emit('presence:init', await initialState());
       io.emit('presence:updated', presence);
+      if (personalOffice) io.emit('room:occupancy_changed', { roomId: personalOffice.id, roomOccupancyMap: await db.getRoomOccupancyMap() });
     });
 
     socket.on('user:update_status', ({ updates } = {}) => runSocket(socket, async () => {
       const allowed = ['status', 'isMuted', 'isCameraOn', 'isSharingScreen', 'currentMusic', 'customStatus'];
       const clean = Object.fromEntries(Object.entries(updates || {}).filter(([key]) => allowed.includes(key)));
       if (clean.status && !['online', 'in_call', 'focusing', 'listening_music', 'away'].includes(String(clean.status))) delete clean.status;
+      const presence = (await db.getPresences())[user.id];
+      const currentRoom = (await db.getRooms()).find((room) => room.id === presence?.currentRoomId);
+      if (currentRoom?.type === 'personal') {
+        clean.isCameraOn = false;
+        clean.isSharingScreen = false;
+      }
       io.emit('presence:updated', await db.updatePresence(user.id, clean));
     }));
 
@@ -718,7 +775,14 @@ async function startServer() {
           ? restoreStatus
           : 'online';
         await db.resumeActivitySession(user.id);
-        io.emit('presence:updated', await db.updatePresence(user.id, { status: safeStatus, customStatus: undefined }));
+        let presence = (await db.getPresences())[user.id];
+        if (!presence?.currentRoomId) {
+          const personalOffice = await db.getPersonalRoom(user.id);
+          if (personalOffice) { socket.join(personalOffice.id); await db.joinRoom(personalOffice.id, user.id); }
+          presence = (await db.getPresences())[user.id];
+        }
+        io.emit('presence:updated', await db.updatePresence(user.id, { status: presence?.currentRoomId ? safeStatus : 'online', customStatus: undefined }));
+        io.emit('room:occupancy_changed', { roomOccupancyMap: await db.getRoomOccupancyMap() });
         return;
       }
 
@@ -789,6 +853,8 @@ async function startServer() {
         occupants: (await db.getRoomOccupancyMap())[previousRoomId] || [],
         roomOccupancyMap: await db.getRoomOccupancyMap(),
       });
+      const personalOffice = await db.getPersonalRoom(user.id);
+      if (personalOffice && personalOffice.id !== previousRoomId) { socket.join(personalOffice.id); await db.joinRoom(personalOffice.id, user.id); }
       io.emit('presence:updated', (await db.getPresences())[user.id]);
       socket.to(previousRoomId).emit('webrtc:peer-left', { roomId: previousRoomId, peerId: user.id, socketId: socket.id });
       const previousRoom = (await db.getRooms()).find((room) => room.id === previousRoomId);
@@ -798,6 +864,26 @@ async function startServer() {
         const ended = await db.createDmSystemEvent(user.id, previousRoom.ownerUserId, 'call_ended', `Call ended · ${formatDuration(durationSeconds)}.`, { roomId: previousRoomId, durationSeconds });
         await emitChat(ended.conversationId, 'chat:message', ended);
       }
+    }));
+
+    socket.on('room:kick', ({ targetUserId } = {}) => runSocket(socket, async () => {
+      if (!targetUserId || targetUserId === user.id) return;
+      const target = await db.getUser(targetUserId);
+      const targetPresence = (await db.getPresences())[targetUserId];
+      const room = (await db.getRooms()).find((item) => item.id === targetPresence?.currentRoomId);
+      if (!target || !room || (!user.isAdmin && room.ownerUserId !== user.id)) return;
+      const personalOffice = await db.getPersonalRoom(targetUserId);
+      if (!personalOffice || personalOffice.id === room.id) return;
+      await db.joinRoom(personalOffice.id, targetUserId);
+      mediaReadyByRoom.get(room.id)?.delete(targetUserId);
+      for (const socketId of userSockets.get(targetUserId) || []) {
+        const targetSocket = io.sockets.sockets.get(socketId);
+        targetSocket?.leave(room.id); targetSocket?.join(personalOffice.id);
+        io.to(socketId).emit('room:kicked', { roomId: personalOffice.id, message: `${user.name} removed you from ${room.name}. You returned to your office.` });
+        targetSocket?.to(room.id).emit('webrtc:peer-left', { roomId: room.id, peerId: targetUserId, socketId });
+      }
+      io.emit('presence:updated', (await db.getPresences())[targetUserId]);
+      io.emit('room:occupancy_changed', { roomId: room.id, roomOccupancyMap: await db.getRoomOccupancyMap() });
     }));
 
     socket.on('knock:send', ({ toUserId, message } = {}) => runSocket(socket, async () => {
@@ -811,7 +897,10 @@ async function startServer() {
         const pending = pendingKnocks.get(pendingKey);
         if (!pending || pending.sentAt !== sentAt) return;
         pendingKnocks.delete(pendingKey);
-        const missed = await db.createDmSystemEvent(user.id, toUserId, 'call_missed', `Missed call from ${user.name}.`);
+        const expired = { fromUserId: user.id, toUserId, reason: 'timeout' };
+        for (const socketId of userSockets.get(user.id) || []) io.to(socketId).emit('knock:expired', expired);
+        for (const socketId of userSockets.get(toUserId) || []) io.to(socketId).emit('knock:expired', expired);
+        const missed = await db.createDmSystemEvent(user.id, toUserId, 'call_missed', `Missed knock from ${user.name}. Open this conversation to follow up.`);
         await emitChat(missed.conversationId, 'chat:message', missed);
       })(); }, 30_000);
       pendingKnocks.set(pendingKey, { sentAt, timer });
@@ -840,6 +929,18 @@ async function startServer() {
       }
       const event = await db.createDmSystemEvent(user.id, toUserId, accepted ? 'call_accepted' : 'call_declined', accepted ? `${user.name} accepted the call.` : `${user.name} declined the call.`);
       await emitChat(event.conversationId, 'chat:message', event);
+    }));
+
+    socket.on('knock:cancel', ({ toUserId } = {}) => runSocket(socket, async () => {
+      if (!toUserId) return;
+      const pendingKey = `${toUserId}:${user.id}`;
+      const pending = pendingKnocks.get(pendingKey);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      pendingKnocks.delete(pendingKey);
+      const canceled = { fromUserId: user.id, toUserId, reason: 'canceled' };
+      for (const socketId of userSockets.get(user.id) || []) io.to(socketId).emit('knock:expired', canceled);
+      for (const socketId of userSockets.get(toUserId) || []) io.to(socketId).emit('knock:expired', canceled);
     }));
 
     socket.on('room:invite', ({ toUserId } = {}) => runSocket(socket, async () => {

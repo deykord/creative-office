@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Floor, GameLeaderboardItem, KnockEvent, PresenceStatus, ReactionEvent, Room, RoomInviteEvent, Team, User, UserStatusType } from './types';
-import { disconnectSocket, getSocket, joinRoomSocket, leaveRoomSocket, respondKnockSocket, sendKnockSocket, sendReactionSocket, sendRoomInviteSocket, setHandRaisedSocket, setIdleStateSocket, setRtcIceServers, updateUserStatus, WebRTCManager } from './lib/socket';
+import { cancelKnockSocket, disconnectSocket, getSocket, joinRoomSocket, kickUserFromRoomSocket, leaveRoomSocket, respondKnockSocket, sendKnockSocket, sendReactionSocket, sendRoomInviteSocket, setHandRaisedSocket, setIdleStateSocket, setRtcIceServers, updateUserStatus, WebRTCManager } from './lib/socket';
 import { TopBar } from './components/TopBar';
 import { BottomToolbar } from './components/BottomToolbar';
 import { KnockModal } from './components/KnockModal';
@@ -22,9 +22,14 @@ import { ShelfWindow } from './components/ShelfWindow';
 import { CalendarWindow } from './components/CalendarWindow';
 import { StoriesWindow } from './components/StoriesWindow';
 import { RoomInviteModal } from './components/RoomInviteModal';
+import { RegistrationPage } from './components/RegistrationPage';
 
 const preferredStatusKey = (userId: string) => `creative-office-preferred-status:${userId}`;
 const validPreferredStatuses: UserStatusType[] = ['online', 'in_call', 'focusing', 'listening_music', 'away'];
+const officeTabId = crypto.randomUUID();
+const officeTabOpenedAt = Date.now();
+const officeTabStorageKey = 'creative-office-active-tab';
+type OfficeTabClaim = { type: 'claim'; tabId: string; userId: string; openedAt: number };
 const getPreferredStatus = (userId: string): UserStatusType | null => {
   const saved = window.localStorage.getItem(preferredStatusKey(userId)) as UserStatusType | null;
   return saved && validPreferredStatuses.includes(saved) ? saved : null;
@@ -32,6 +37,8 @@ const getPreferredStatus = (userId: string): UserStatusType | null => {
 
 export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
+  const [sessionNotice, setSessionNotice] = useState('');
+  const [tabBlocked, setTabBlocked] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -76,6 +83,10 @@ export default function App() {
   const joinRoomRef = useRef<(roomId: string) => void>(() => undefined);
   const autoJoinedUserRef = useRef('');
   const roomTransitionRef = useRef(0);
+  const localMediaStreamRef = useRef<MediaStream | null>(null);
+  const preJoinStreamRef = useRef<MediaStream | null>(null);
+  localMediaStreamRef.current = localMediaStream;
+  preJoinStreamRef.current = preJoinStream;
 
   useEffect(() => {
     fetch('/api/auth/session')
@@ -102,11 +113,26 @@ export default function App() {
       setLeaderboard(data.leaderboard || []);
     };
     const onInit = (data: any) => applyLiveState(data);
+    const onSessionReplaced = ({ message }: { message?: string } = {}) => {
+      disconnectSocket();
+      autoJoinedUserRef.current = '';
+      setSessionNotice(message || 'Your account was signed in on another device.');
+      setCurrentUser(null);
+      setUsers([]);
+      setPresences({});
+    };
     const refreshLiveState = () => fetch('/api/live-state')
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Live state unavailable')))
+      .then((response) => {
+        if (response.status === 401) {
+          onSessionReplaced();
+          return Promise.reject(new Error('Session replaced'));
+        }
+        return response.ok ? response.json() : Promise.reject(new Error('Live state unavailable'));
+      })
       .then(applyLiveState)
       .catch(() => undefined);
     const onConnect = () => { void refreshLiveState(); };
+    const onConnectError = (error: Error) => { if (error.message.includes('Authentication required')) onSessionReplaced(); };
     const onVisibilityChange = () => { if (document.visibilityState === 'visible') void refreshLiveState(); };
     const onPresence = (presence: PresenceStatus) => {
       setPresences((previous) => {
@@ -121,10 +147,20 @@ export default function App() {
       setOutgoingKnockUser(null);
       if (accepted && roomId) joinRoomRef.current(roomId);
     };
+    const onKnockExpired = ({ fromUserId, toUserId }: { fromUserId?: string; toUserId?: string }) => {
+      setIncomingKnock((current) => current && current.fromUserId === fromUserId ? null : current);
+      if (fromUserId === currentUser.id || toUserId === currentUser.id) setOutgoingKnockUser(null);
+    };
+    const onRoomKicked = ({ roomId, message }: { roomId?: string; message?: string }) => {
+      if (message) setMediaError(message);
+      if (roomId) void joinRoomRef.current(roomId);
+    };
     const onReaction = (reaction: ReactionEvent) => setActiveReactions((previous) => [...previous.slice(-15), reaction]);
     const onHandUpdated = ({ userId, raised }: { userId: string; raised: boolean }) => setRaisedHands((previous) => ({ ...previous, [userId]: raised }));
     socket.on('presence:init', onInit);
     socket.on('connect', onConnect);
+    socket.on('connect_error', onConnectError);
+    socket.on('auth:session_replaced', onSessionReplaced);
     socket.on('presence:updated', onPresence);
     socket.on('room:occupancy_changed', onOccupancy);
     socket.on('knock:received', onKnock);
@@ -142,6 +178,8 @@ export default function App() {
     socket.on('floors:updated', onFloorsUpdated);
     socket.on('hand:updated', onHandUpdated);
     socket.on('knock:responded', onKnockResponded);
+    socket.on('knock:expired', onKnockExpired);
+    socket.on('room:kicked', onRoomKicked);
     socket.connect();
     const liveStateTimer = window.setInterval(() => { if (document.visibilityState === 'visible') void refreshLiveState(); }, 10_000);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -150,6 +188,8 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       socket.off('presence:init', onInit);
       socket.off('connect', onConnect);
+      socket.off('connect_error', onConnectError);
+      socket.off('auth:session_replaced', onSessionReplaced);
       socket.off('presence:updated', onPresence);
       socket.off('room:occupancy_changed', onOccupancy);
       socket.off('knock:received', onKnock);
@@ -160,8 +200,60 @@ export default function App() {
       socket.off('floors:updated', onFloorsUpdated);
       socket.off('hand:updated', onHandUpdated);
       socket.off('knock:responded', onKnockResponded);
+      socket.off('knock:expired', onKnockExpired);
+      socket.off('room:kicked', onRoomKicked);
     };
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser || tabBlocked) return;
+    const channel = 'BroadcastChannel' in window ? new BroadcastChannel('creativeprocess-office-tabs') : null;
+    let claimed = false;
+
+    const ownClaim = (): OfficeTabClaim => ({ type: 'claim', tabId: officeTabId, userId: currentUser.id, openedAt: officeTabOpenedAt });
+    const publishClaim = () => {
+      if (claimed) return;
+      claimed = true;
+      const claim = ownClaim();
+      channel?.postMessage(claim);
+      try { window.localStorage.setItem(officeTabStorageKey, JSON.stringify({ ...claim, nonce: crypto.randomUUID() })); } catch { /* BroadcastChannel remains available in modern browsers. */ }
+    };
+    const isNewer = (claim: OfficeTabClaim) => claim.openedAt > officeTabOpenedAt || (claim.openedAt === officeTabOpenedAt && claim.tabId > officeTabId);
+    const handleClaim = (claim: OfficeTabClaim | null) => {
+      if (!claim || claim.type !== 'claim' || claim.userId !== currentUser.id || claim.tabId === officeTabId) return;
+      if (!isNewer(claim)) {
+        channel?.postMessage(ownClaim());
+        return;
+      }
+      stopKnockRinging();
+      webrtcManagerRef.current?.suspendForTabTakeover();
+      localMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      preJoinStreamRef.current?.getTracks().forEach((track) => track.stop());
+      disconnectSocket();
+      setIncomingKnock(null);
+      setOutgoingKnockUser(null);
+      setIncomingRoomInvite(null);
+      setTabBlocked(true);
+    };
+    const onChannelMessage = (event: MessageEvent<OfficeTabClaim>) => handleClaim(event.data);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== officeTabStorageKey || !event.newValue) return;
+      try { handleClaim(JSON.parse(event.newValue) as OfficeTabClaim); } catch { /* Ignore malformed external storage values. */ }
+    };
+    channel?.addEventListener('message', onChannelMessage);
+    window.addEventListener('storage', onStorage);
+
+    const socket = getSocket();
+    if (socket.connected) publishClaim();
+    else socket.once('connect', publishClaim);
+
+    return () => {
+      socket.off('connect', publishClaim);
+      channel?.removeEventListener('message', onChannelMessage);
+      channel?.close();
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [currentUser?.id, tabBlocked]);
 
   useEffect(() => {
     if (incomingKnock || incomingRoomInvite) startKnockRinging();
@@ -170,12 +262,12 @@ export default function App() {
   }, [incomingKnock?.id, incomingRoomInvite?.id]);
 
   useEffect(() => {
-    if (!currentUser?.officeIntroSeen || autoJoinedUserRef.current === currentUser.id) return;
+    if (!currentUser || autoJoinedUserRef.current === currentUser.id) return;
     const personalOffice = rooms.find((room) => room.ownerUserId === currentUser.id);
     if (!personalOffice) return;
     autoJoinedUserRef.current = currentUser.id;
     joinRoomRef.current(personalOffice.id);
-  }, [currentUser?.id, currentUser?.officeIntroSeen, rooms]);
+  }, [currentUser?.id, rooms]);
 
   const speakingUsers = useVoiceActivity({
     enabled: Boolean(activeMediaRoom),
@@ -187,7 +279,22 @@ export default function App() {
   if (authLoading) {
     return <div className="min-h-screen bg-[#0C0C0E] flex items-center justify-center"><div className="w-8 h-8 rounded-full border-2 border-zinc-800 border-t-[#D9A34A] animate-spin" /></div>;
   }
-  if (!currentUser) return <LoginPage onAuthenticated={setCurrentUser} />;
+  if (!currentUser) {
+    const registrationToken = new URLSearchParams(window.location.search).get('token');
+    if (window.location.pathname === '/register' && registrationToken) return <RegistrationPage token={registrationToken} onAuthenticated={(user) => { setSessionNotice(''); setCurrentUser(user); }} />;
+    return <LoginPage notice={sessionNotice} onAuthenticated={(user) => { setSessionNotice(''); setCurrentUser(user); }} />;
+  }
+  if (tabBlocked) {
+    return <main className="flex min-h-screen items-center justify-center bg-[#08090b] px-5 text-zinc-100">
+      <section role="alert" className="w-full max-w-md rounded-[28px] border border-white/[.09] bg-[#121318]/95 p-7 text-center shadow-[0_35px_120px_rgba(0,0,0,.65)] sm:p-9">
+        <img src="/creativeprocess-mark.svg" alt="Creativeprocess Office" className="mx-auto h-12 w-12" />
+        <h1 className="mt-6 text-xl font-semibold tracking-tight">Office is active in another tab</h1>
+        <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-zinc-500">The newest tab is now your active Office session. Please close this tab and continue working from only one Office tab.</p>
+        <div className="mx-auto mt-6 h-px w-16 bg-gradient-to-r from-transparent via-amber-300/45 to-transparent" />
+        <p className="mt-5 text-[11px] text-zinc-600">This tab has released its microphone, camera, and live connection.</p>
+      </section>
+    </main>;
+  }
 
   const currentPresence = presences[currentUser.id];
   const updateLocalPresence = (updates: Partial<PresenceStatus>) => {
@@ -217,6 +324,11 @@ export default function App() {
   };
   const updateStatus = (updates: Partial<PresenceStatus>) => {
     const manager = webrtcManagerRef.current;
+    if (activeMediaRoom?.type === 'personal' && (updates.isCameraOn === true || updates.isSharingScreen === true)) {
+      updateLocalPresence({ isCameraOn: false, isSharingScreen: false });
+      updateUserStatus(currentUser.id, { isCameraOn: false, isSharingScreen: false });
+      return;
+    }
     if (!manager && (typeof updates.isMuted === 'boolean' || typeof updates.isCameraOn === 'boolean')) {
       setMediaError('Join a meeting or theater room before using camera or microphone controls.');
       return;
@@ -422,6 +534,12 @@ export default function App() {
   };
 
   const leaveRoom = () => {
+    const personalOffice = rooms.find((room) => room.ownerUserId === currentUser.id);
+    if (personalOffice && currentPresence?.currentRoomId !== personalOffice.id) {
+      void joinRoom(personalOffice.id);
+      return;
+    }
+    if (personalOffice) return;
     roomTransitionRef.current += 1;
     const manager = webrtcManagerRef.current;
     manager?.leaveWebRTCRoom();
@@ -542,22 +660,22 @@ export default function App() {
     : undefined;
 
   return (
-    <div className="h-[calc(100vh-16px)] m-2 bg-[#08090b] text-zinc-100 flex flex-col relative overflow-hidden rounded-[28px] border border-white/[.1] shadow-[0_35px_120px_rgba(0,0,0,.7)]" style={{ backgroundImage: 'radial-gradient(circle at 50% -25%,rgba(116,89,47,.12),transparent 35%)' }}>
+    <div className="m-1 h-[calc(100dvh-8px)] bg-[#08090b] text-zinc-100 flex flex-col relative overflow-hidden rounded-[20px] border border-white/[.1] shadow-[0_35px_120px_rgba(0,0,0,.7)] sm:m-2 sm:h-[calc(100dvh-16px)] sm:rounded-[28px]" style={{ backgroundImage: 'radial-gradient(circle at 50% -25%,rgba(116,89,47,.12),transparent 35%)' }}>
       <TopBar currentUser={currentUser} currentPresence={currentPresence} allPresences={presences} onUpdateStatus={updateManualStatus} onOpenProfileModal={() => setIsProfileModalOpen(true)} onOpenUserManagement={() => setIsUserManagementOpen(true)} onLogout={logout} />
-      {mediaError && !expandedRoom && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 max-w-lg bg-red-500/10 backdrop-blur-xl border border-red-500/30 text-red-200 rounded-xl px-4 py-3 text-sm shadow-2xl">{mediaError}</div>}
+      {mediaError && !expandedRoom && <div role="status" className="fixed right-2 top-[6.6rem] z-50 max-w-[180px] rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] leading-4 text-red-200 shadow-2xl backdrop-blur-xl sm:left-1/2 sm:right-auto sm:top-20 sm:max-w-lg sm:-translate-x-1/2 sm:px-4 sm:py-3 sm:text-sm">{mediaError}</div>}
       <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">{activeReactions.map((reaction) => <div key={reaction.id} className="absolute animate-float-up text-3xl" style={{ left: `${10 + Math.random() * 80}%`, bottom: '12%' }}>{reaction.emoji}</div>)}</div>
 
       <div className="flex-1 flex flex-col md:flex-row w-full min-h-0 overflow-hidden border-y border-white/[.055]">
-        <nav aria-label="Switch office floor" className="md:hidden h-11 shrink-0 border-b border-white/[.06] bg-[#0a0b0e]/96 px-2 py-1.5 flex items-center gap-1.5 overflow-x-auto">
-          {floors.map((floor) => <button key={floor.id} type="button" aria-current={floor.id === activeFloor?.id ? 'page' : undefined} onClick={() => setActiveFloorId(floor.id)} className={`h-8 shrink-0 rounded-xl border px-3 text-[11px] font-semibold transition ${floor.id === activeFloor?.id ? 'border-amber-300/30 bg-amber-300/10 text-amber-200' : 'border-white/[.07] bg-white/[.025] text-zinc-500'}`}><span className="mr-2 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: floor.color }} />{floor.name}</button>)}
+        <nav aria-label="Switch office floor" className="md:hidden h-10 shrink-0 border-b border-white/[.06] bg-[#0a0b0e]/96 px-1.5 py-1 flex items-center gap-1 overflow-x-auto">
+          {floors.map((floor) => <button key={floor.id} type="button" aria-current={floor.id === activeFloor?.id ? 'page' : undefined} onClick={() => setActiveFloorId(floor.id)} className={`h-8 shrink-0 rounded-lg border px-2.5 text-[10px] font-semibold transition ${floor.id === activeFloor?.id ? 'border-amber-300/30 bg-amber-300/10 text-amber-200' : 'border-white/[.07] bg-white/[.025] text-zinc-500'}`}><span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: floor.color }} />{floor.name}</button>)}
         </nav>
         {activeFloor && <OfficeFloor floor={activeFloor} rooms={visibleRooms} users={users} presences={presences} roomOccupancyMap={roomOccupancyMap} currentUser={currentUser} currentRoomId={currentPresence?.currentRoomId} speakingUsers={speakingUsers} onJoinRoom={requestRoomJoin} onLeaveRoom={leaveRoom} onKnock={knockOnUser} onUserMenu={(user, event) => setUserMenu({ user, x: event.clientX, y: event.clientY })} />}
-        <aside aria-label="Office floors" className="relative hidden md:flex md:w-[310px] lg:w-[370px] shrink-0 border-l border-white/[.075] bg-[#0a0b0e]/97 flex-col overflow-hidden">
+        <aside aria-label="Office floors" className="relative hidden md:flex md:w-[280px] lg:w-[330px] shrink-0 border-l border-white/[.075] bg-[#0a0b0e]/97 flex-col overflow-hidden">
           <div className="min-h-0 flex-1"><FloorNavigator floors={floors} rooms={rooms} users={users} presences={presences} roomOccupancyMap={roomOccupancyMap} activeFloorId={activeFloor?.id || ''} onSelectFloor={setActiveFloorId} onUserMenu={(user, event) => setUserMenu({ user, x: event.clientX, y: event.clientY })} /></div>
         </aside>
       </div>
 
-      <BottomToolbar currentPresence={currentPresence} onUpdateStatus={updateStatus} onSendGlobalReaction={(emoji) => sendReaction(emoji)} onOpenShelf={() => setShelfWindowOpen((value) => !value)} shelfOpen={shelfWindowOpen} shelfLabel={`Open ${(activeMediaRoom?.type === 'personal' ? users.find((user) => user.id === activeMediaRoom.ownerUserId)?.name : currentUser.name) || currentUser.name}'s shelf`} canShareScreen={Boolean(activeMediaRoom)} onOpenCalendar={() => setCalendarWindowOpen((value) => !value)} onOpenStories={() => setStoriesWindowOpen((value) => !value)} calendarOpen={calendarWindowOpen} storiesOpen={storiesWindowOpen} />
+      <BottomToolbar currentPresence={currentPresence} onUpdateStatus={updateStatus} onSendGlobalReaction={(emoji) => sendReaction(emoji)} onOpenShelf={() => setShelfWindowOpen((value) => !value)} shelfOpen={shelfWindowOpen} shelfLabel={`Open ${(activeMediaRoom?.type === 'personal' ? users.find((user) => user.id === activeMediaRoom.ownerUserId)?.name : currentUser.name) || currentUser.name}'s shelf`} canShareScreen={Boolean(activeMediaRoom && activeMediaRoom.type !== 'personal')} voiceOnly={activeMediaRoom?.type === 'personal'} onOpenCalendar={() => setCalendarWindowOpen((value) => !value)} onOpenStories={() => setStoriesWindowOpen((value) => !value)} calendarOpen={calendarWindowOpen} storiesOpen={storiesWindowOpen} />
       {personalPresenter && personalPresentationStream && <PersonalOfficePresentation presenter={personalPresenter} stream={personalPresentationStream} isLocal={personalPresenter.id === currentUser.id} onStop={() => updateStatus({ isSharingScreen: false })} />}
       {activeMediaRoom?.type === 'personal' && (
         <div className="sr-only" aria-label="Personal office audio connections">
@@ -565,12 +683,12 @@ export default function App() {
         </div>
       )}
       <ExpandedRoomModal isOpen={!!expandedRoom} onClose={leaveRoom} room={expandedRoom} users={users} presences={presences} currentUser={currentUser} currentPresence={currentPresence} activeReactions={activeReactions} onSendReaction={(emoji) => sendReaction(emoji, expandedRoom?.id)} onUpdateStatus={updateStatus} localMediaStream={localMediaStream} remoteStreams={remoteStreams} mediaError={mediaError} raisedHands={raisedHands} speakingUsers={speakingUsers} onHandRaised={(raised) => { setRaisedHands((previous) => ({ ...previous, [currentUser.id]: raised })); setHandRaisedSocket(raised); }} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectActiveDevice('audio', id)} onSelectVideoDevice={(id) => void selectActiveDevice('video', id)} />
-      <KnockModal knock={incomingKnock} outgoingTargetUser={outgoingKnockUser} onAccept={() => { const personalOffice = rooms.find((room) => room.ownerUserId === currentUser.id); if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, true); if (personalOffice) joinRoom(personalOffice.id); setIncomingKnock(null); }} onDecline={() => { if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, false); setIncomingKnock(null); }} onCancelOutgoing={() => setOutgoingKnockUser(null)} />
+      <KnockModal knock={incomingKnock} outgoingTargetUser={outgoingKnockUser} onAccept={() => { const personalOffice = rooms.find((room) => room.ownerUserId === currentUser.id); if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, true); if (personalOffice) joinRoom(personalOffice.id); setIncomingKnock(null); }} onDecline={() => { if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, false); setIncomingKnock(null); }} onCancelOutgoing={() => { if (outgoingKnockUser) cancelKnockSocket(outgoingKnockUser.id); setOutgoingKnockUser(null); }} />
       <ProfileModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} currentUser={currentUser} currentPresence={currentPresence} onSave={saveProfile} />
       {currentUser.isAdmin && <UserManagementModal isOpen={isUserManagementOpen} onClose={() => setIsUserManagementOpen(false)} users={users} rooms={rooms} floors={floors} currentUser={currentUser} onUsersChanged={setUsers} onRoomsChanged={setRooms} onFloorsChanged={setFloors} />}
       {!currentUser.officeIntroSeen && <OfficeWelcomeModal user={currentUser} busy={introBusy} error={introError} onContinue={acknowledgeOfficeIntro} />}
       <MeetingPreJoinModal room={pendingMeetingRoom} busy={meetingConsentBusy} error={meetingConsentError} previewStream={preJoinStream} micOn={preJoinMicOn} cameraOn={preJoinCameraOn} onToggleMic={() => void togglePreJoinDevice('audio')} onToggleCamera={() => void togglePreJoinDevice('video')} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectPreJoinDevice('audio', id)} onSelectVideoDevice={(id) => void selectPreJoinDevice('video', id)} onCancel={() => { preJoinStream?.getTracks().forEach((track) => track.stop()); setPreJoinStream(null); setPendingMeetingRoom(null); setMeetingConsentError(''); }} onConfirm={confirmMeetingJoin} />
-      {userMenu && <UserActionMenu target={userMenu.user} currentUser={currentUser} presence={presences[userMenu.user.id]} rooms={rooms} x={userMenu.x} y={userMenu.y} onClose={() => setUserMenu(null)} onChat={() => void openDirectMessage(userMenu.user.id)} onCall={() => { const targetId = userMenu.user.id; setUserMenu(null); knockOnUser(targetId); }} onInvite={() => { sendRoomInviteSocket(userMenu.user.id); setUserMenu(null); }} />}
+      {userMenu && <UserActionMenu target={userMenu.user} currentUser={currentUser} presence={presences[userMenu.user.id]} rooms={rooms} x={userMenu.x} y={userMenu.y} onClose={() => setUserMenu(null)} onChat={() => void openDirectMessage(userMenu.user.id)} onCall={() => { const targetId = userMenu.user.id; setUserMenu(null); knockOnUser(targetId); }} onInvite={() => { sendRoomInviteSocket(userMenu.user.id); setUserMenu(null); }} onKick={() => { if (window.confirm(`Remove ${userMenu.user.name} from this room?`)) kickUserFromRoomSocket(userMenu.user.id); setUserMenu(null); }} />}
       <RoomInviteModal invite={incomingRoomInvite} onDecline={() => setIncomingRoomInvite(null)} onAccept={() => { const invite = incomingRoomInvite; setIncomingRoomInvite(null); if (invite) requestRoomJoin(invite.roomId); }} />
       <ChatWindow currentUser={currentUser} users={users} open={chatWindowOpen} selectedConversationId={selectedConversationId} onOpen={() => setChatWindowOpen(true)} onClose={() => setChatWindowOpen(false)} onSelectConversation={setSelectedConversationId} />
       <ShelfWindow open={shelfWindowOpen} owner={(activeMediaRoom?.type === 'personal' && users.find((user) => user.id === activeMediaRoom.ownerUserId)) || currentUser} currentUser={currentUser} onClose={() => setShelfWindowOpen(false)} />

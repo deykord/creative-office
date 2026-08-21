@@ -103,6 +103,8 @@ class OfficeDatabase {
     await pool.query("UPDATE rooms SET type = 'personal' WHERE owner_user_id IS NOT NULL AND type <> 'personal'");
     await pool.query('UPDATE activity_sessions SET ended_at = NOW() WHERE ended_at IS NULL');
     await pool.query('UPDATE room_sessions SET left_at = NOW() WHERE left_at IS NULL');
+    await pool.query('DELETE FROM room_occupancy');
+    await pool.query("UPDATE presence_status SET status='offline', current_room_id=NULL, is_muted=false, is_camera_on=false, is_sharing_screen=false");
     await pool.query('DELETE FROM auth_sessions WHERE expires_at <= NOW()');
   }
 
@@ -136,13 +138,13 @@ class OfficeDatabase {
     return { ...mapUser(rows[0]), passwordHash: rows[0].password_hash, isAdmin: rows[0].is_admin };
   }
 
-  async createUser(input: { id: string; username: string; passwordHash: string; name: string; role?: string; isAdmin?: boolean; defaultFloorId?: string; gender?: 'male' | 'female' }): Promise<User> {
+  async createUser(input: { id: string; username: string; passwordHash: string; name: string; email?: string; role?: string; isAdmin?: boolean; defaultFloorId?: string; gender?: 'male' | 'female' }): Promise<User> {
     return inTransaction(async (client) => {
       const floorId = input.defaultFloorId || (await client.query('SELECT id FROM floors ORDER BY sort_order, created_at LIMIT 1')).rows[0]?.id;
       const { rows } = await client.query(
-        `INSERT INTO users (id, username, password_hash, name, role, is_admin, default_floor_id, gender)
-         VALUES ($1, lower($2), $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [input.id, input.username, input.passwordHash, input.name, input.role || 'Member', Boolean(input.isAdmin), floorId, input.gender || 'male'],
+        `INSERT INTO users (id, username, password_hash, name, email, role, is_admin, default_floor_id, gender)
+         VALUES ($1, lower($2), $3, $4, lower($5), $6, $7, $8, $9) RETURNING *`,
+        [input.id, input.username, input.passwordHash, input.name, input.email || null, input.role || 'Member', Boolean(input.isAdmin), floorId, input.gender || 'male'],
       );
       await client.query('INSERT INTO presence_status (user_id) VALUES ($1)', [input.id]);
       await client.query(`INSERT INTO conversation_members (conversation_id,user_id)
@@ -155,6 +157,21 @@ class OfficeDatabase {
       );
       return { ...mapUser(rows[0]), personalRoomId };
     });
+  }
+
+  async createOfficeInvitation(input: { id: string; email: string; tokenHash: string; role: string; gender: 'male' | 'female'; defaultFloorId?: string; invitedBy: string; expiresAt: Date }) {
+    await pool.query("UPDATE office_invitations SET accepted_at=NOW() WHERE lower(email)=lower($1) AND accepted_at IS NULL", [input.email]);
+    const { rows } = await pool.query(`INSERT INTO office_invitations (id,email,token_hash,role,gender,default_floor_id,invited_by,expires_at) VALUES ($1,lower($2),$3,$4,$5,$6,$7,$8) RETURNING id,email,role,gender,default_floor_id,expires_at,created_at`, [input.id, input.email, input.tokenHash, input.role, input.gender, input.defaultFloorId || null, input.invitedBy, input.expiresAt]);
+    return rows[0];
+  }
+
+  async getOfficeInvitation(tokenHashValue: string) {
+    const { rows } = await pool.query(`SELECT id,email,role,gender,default_floor_id,expires_at FROM office_invitations WHERE token_hash=$1 AND accepted_at IS NULL AND expires_at>NOW()`, [tokenHashValue]);
+    return rows[0];
+  }
+
+  async acceptOfficeInvitation(id: string): Promise<void> {
+    await pool.query('UPDATE office_invitations SET accepted_at=NOW() WHERE id=$1', [id]);
   }
 
   async updateUser(id: string, updates: { name?: string; role?: string; bio?: string; gender?: 'male' | 'female'; avatarUrl?: string }): Promise<User | undefined> {
@@ -206,10 +223,11 @@ class OfficeDatabase {
   }
 
   async createSession(tokenHash: string, userId: string, expiresAt: Date): Promise<void> {
-    await pool.query(
-      'INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)',
-      [tokenHash, userId, expiresAt],
-    );
+    await inTransaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [userId]);
+      await client.query('DELETE FROM auth_sessions WHERE user_id = $1', [userId]);
+      await client.query('INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)', [tokenHash, userId, expiresAt]);
+    });
   }
 
   async getSessionUser(tokenHash: string): Promise<User | undefined> {

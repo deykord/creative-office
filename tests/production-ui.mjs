@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 
-const baseURL = process.env.APP_URL || 'https://91-107-242-1.sslip.io';
+const baseURL = process.env.APP_URL || 'https://office.creativeprocess.io';
 const adminPassword = process.env.ADMIN_PASSWORD || 'admin1234';
 const suffix = Date.now().toString().slice(-8);
 const auditUsername = `ui_audit_${suffix}`;

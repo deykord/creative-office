@@ -21,6 +21,14 @@ INSERT INTO floors (id, name, description, color, sort_order)
 SELECT 'main-floor', 'Main Floor', 'The default workspace floor', '#D9A34A', 0
 WHERE NOT EXISTS (SELECT 1 FROM floors);
 
+INSERT INTO floors (id, name, description, color, sort_order) VALUES
+  ('sale-floor', 'Sale Floor', 'Reserved for the sales team', '#38BDF8', 1),
+  ('tech-floor', 'Tech Floor', 'Reserved for the technology team', '#8B5CF6', 2)
+ON CONFLICT (id) DO UPDATE SET
+  name = EXCLUDED.name,
+  description = EXCLUDED.description,
+  color = EXCLUDED.color;
+
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(64) PRIMARY KEY,
   username VARCHAR(64) UNIQUE NOT NULL,
@@ -41,6 +49,19 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   token_hash CHAR(64) PRIMARY KEY,
   user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS office_invitations (
+  id VARCHAR(64) PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  token_hash CHAR(64) UNIQUE NOT NULL,
+  role VARCHAR(120) NOT NULL DEFAULT 'Member',
+  gender VARCHAR(16) NOT NULL DEFAULT 'male',
+  default_floor_id VARCHAR(64) REFERENCES floors(id) ON DELETE SET NULL,
+  invited_by VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  accepted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -246,6 +267,7 @@ CREATE INDEX IF NOT EXISTS idx_users_default_floor_id ON users(default_floor_id)
 CREATE INDEX IF NOT EXISTS idx_rooms_floor_id ON rooms(floor_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON auth_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON auth_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_office_invitations_email ON office_invitations(lower(email), created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_occupancy_room_id ON room_occupancy(room_id);
 CREATE INDEX IF NOT EXISTS idx_reactions_created_at ON reactions(created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_owner_user_id ON rooms(owner_user_id) WHERE owner_user_id IS NOT NULL;

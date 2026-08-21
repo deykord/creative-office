@@ -29,7 +29,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   const [soundMuted, setSoundMutedState] = useState(getSoundMuted());
   const [theme, setTheme] = useState<'dark' | 'light'>(() => document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
   const currentStatus = STATUS_OPTIONS.find((option) => option.type === currentPresence?.status) || STATUS_OPTIONS[0];
-  const online = (Object.values(allPresences) as PresenceStatus[]).filter((presence) => presence.status !== 'offline').length;
 
   const toggleSound = () => {
     const next = !soundMuted;
@@ -47,7 +46,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 
   return (
     <header className="relative h-14 bg-[#08090b]/96 backdrop-blur-2xl px-4 md:px-5 flex items-center justify-between sticky top-0 z-[70] shrink-0">
-      <div className="flex items-center gap-3"><img src="/creativeprocess-mark.svg" alt="Creativeprocess Office" className="h-8 w-8 sm:hidden drop-shadow-[0_0_12px_rgba(217,163,74,.16)]" /><p className="hidden md:flex items-center gap-2 rounded-full border border-white/[.065] bg-white/[.02] px-3 py-2 text-[10px] text-zinc-500"><span className="relative flex w-2 h-2"><span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-40 animate-ping" /><span className="relative inline-flex w-2 h-2 rounded-full bg-emerald-400" /></span>{online} online</p></div>
+      <div><img src="/creativeprocess-mark.svg" alt="Creativeprocess Office" className="h-8 w-8 sm:hidden drop-shadow-[0_0_12px_rgba(217,163,74,.16)]" /></div>
 
       <div className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-2.5 pointer-events-none sm:flex"><img src="/creativeprocess-mark.svg" alt="" className="w-8 h-8 drop-shadow-[0_0_12px_rgba(217,163,74,.16)]" /><h1 className="hidden lg:block text-base font-medium tracking-[0.11em] text-[#d7b56d]">Creativeprocess Office</h1></div>
 
