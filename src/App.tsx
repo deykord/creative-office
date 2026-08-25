@@ -15,7 +15,8 @@ import { OfficeFloor } from './components/OfficeFloor';
 import { MeetingPreJoinModal } from './components/MeetingPreJoinModal';
 import { FloorNavigator } from './components/FloorNavigator';
 import { UserActionMenu } from './components/UserActionMenu';
-import { PersonalOfficePresentation } from './components/PersonalOfficePresentation';
+import { PersonalOfficePresentation, PersonalOfficeMediaParticipant } from './components/PersonalOfficePresentation';
+import { OfficePictureInPicture } from './components/OfficePictureInPicture';
 import { ChatWindow } from './components/ChatWindow';
 import { InactivityMonitor } from './components/InactivityMonitor';
 import { ShelfWindow } from './components/ShelfWindow';
@@ -81,6 +82,42 @@ export default function App() {
   const preJoinStreamRef = useRef<MediaStream | null>(null);
   localMediaStreamRef.current = localMediaStream;
   preJoinStreamRef.current = preJoinStream;
+
+  useEffect(() => {
+    if (!currentUser || !navigator.mediaDevices?.enumerateDevices) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) return;
+        const microphones = devices.filter((device) => device.kind === 'audioinput');
+        const cameras = devices.filter((device) => device.kind === 'videoinput');
+        setAudioDevices(microphones);
+        setVideoDevices(cameras);
+        setSelectedAudioDeviceId((current) => microphones.some((device) => device.deviceId === current) ? current : microphones[0]?.deviceId || '');
+        setSelectedVideoDeviceId((current) => cameras.some((device) => device.deviceId === current) ? current : cameras[0]?.deviceId || '');
+      } catch {
+        if (!cancelled) {
+          setAudioDevices([]);
+          setVideoDevices([]);
+        }
+      }
+    };
+    void refresh();
+    navigator.mediaDevices.addEventListener?.('devicechange', refresh);
+    return () => {
+      cancelled = true;
+      navigator.mediaDevices.removeEventListener?.('devicechange', refresh);
+    };
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!activeMediaRoom || !webrtcManagerRef.current) return;
+    const allowedUsers = new Set(roomOccupancyMap[activeMediaRoom.id] || []);
+    Object.keys(remoteStreams).forEach((peerId) => {
+      if (!allowedUsers.has(peerId)) webrtcManagerRef.current?.removePeer(peerId);
+    });
+  }, [activeMediaRoom?.id, remoteStreams, roomOccupancyMap]);
 
   useEffect(() => {
     fetch('/api/auth/session')
@@ -332,11 +369,6 @@ export default function App() {
   };
   const updateStatus = (updates: Partial<PresenceStatus>) => {
     const manager = webrtcManagerRef.current;
-    if (activeMediaRoom?.type === 'personal' && (updates.isCameraOn === true || updates.isSharingScreen === true)) {
-      updateLocalPresence({ isCameraOn: false, isSharingScreen: false });
-      updateUserStatus(currentUser.id, { isCameraOn: false, isSharingScreen: false });
-      return;
-    }
     if (!manager && (typeof updates.isMuted === 'boolean' || typeof updates.isCameraOn === 'boolean')) {
       setMediaError('Join a meeting or theater room before using camera or microphone controls.');
       return;
@@ -480,15 +512,12 @@ export default function App() {
   };
 
   const selectPreJoinDevice = async (kind: 'audio' | 'video', deviceId: string) => {
-    if (kind === 'audio') {
-      setSelectedAudioDeviceId(deviceId);
-      window.localStorage.setItem('creative-office-audio-input', deviceId);
-    } else {
-      setSelectedVideoDeviceId(deviceId);
-      window.localStorage.setItem('creative-office-video-input', deviceId);
-    }
+    const saveSelection = () => {
+      if (kind === 'audio') setSelectedAudioDeviceId(deviceId); else setSelectedVideoDeviceId(deviceId);
+      window.localStorage.setItem(kind === 'audio' ? 'creative-office-audio-input' : 'creative-office-video-input', deviceId);
+    };
     const enabled = kind === 'audio' ? preJoinMicOn : preJoinCameraOn;
-    if (!enabled) return;
+    if (!enabled) { saveSelection(); return; }
     setMeetingConsentBusy(true);
     try {
       const acquired = await navigator.mediaDevices.getUserMedia(kind === 'audio'
@@ -497,6 +526,7 @@ export default function App() {
       const retained = preJoinStream?.getTracks().filter((track) => track.kind !== kind && track.readyState === 'live') || [];
       preJoinStream?.getTracks().filter((track) => track.kind === kind).forEach((track) => track.stop());
       setPreJoinStream(new MediaStream([...retained, ...acquired.getTracks()]));
+      saveSelection();
       await refreshMediaDevices();
     } catch (error) { setMeetingConsentError(error instanceof Error ? error.message : 'The selected device is unavailable.'); }
     finally { setMeetingConsentBusy(false); }
@@ -504,20 +534,19 @@ export default function App() {
 
   const selectActiveDevice = async (kind: 'audio' | 'video', deviceId: string) => {
     const manager = webrtcManagerRef.current;
-    if (kind === 'audio') {
-      setSelectedAudioDeviceId(deviceId);
-      window.localStorage.setItem('creative-office-audio-input', deviceId);
-    } else {
-      setSelectedVideoDeviceId(deviceId);
-      window.localStorage.setItem('creative-office-video-input', deviceId);
-    }
-    if (!manager || (kind === 'audio' && currentPresence?.isMuted) || (kind === 'video' && !currentPresence?.isCameraOn)) return;
+    const saveSelection = () => {
+      if (kind === 'audio') setSelectedAudioDeviceId(deviceId); else setSelectedVideoDeviceId(deviceId);
+      window.localStorage.setItem(kind === 'audio' ? 'creative-office-audio-input' : 'creative-office-video-input', deviceId);
+    };
+    if (!manager || (kind === 'audio' && currentPresence?.isMuted) || (kind === 'video' && !currentPresence?.isCameraOn)) { saveSelection(); return; }
     try {
       const stream = kind === 'audio' ? await manager.setAudioDevice(deviceId) : await manager.setVideoDevice(deviceId);
+      saveSelection();
       setLocalMediaStream(stream);
       updateLocalPresence(kind === 'audio' ? { isMuted: false } : { isCameraOn: true });
       updateUserStatus(currentUser.id, kind === 'audio' ? { isMuted: false } : { isCameraOn: true });
       setMediaError('');
+      await refreshMediaDevices();
     } catch (error) { setMediaError(error instanceof Error ? error.message : 'The selected device is unavailable.'); }
   };
 
@@ -606,8 +635,21 @@ export default function App() {
 
   const logout = async () => {
     stopKnockRinging();
-    webrtcManagerRef.current?.leaveWebRTCRoom();
-    await fetch('/api/auth/logout', { method: 'POST' });
+    roomTransitionRef.current += 1;
+    const manager = webrtcManagerRef.current;
+    webrtcManagerRef.current = null;
+    manager?.leaveWebRTCRoom();
+    localMediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    preJoinStreamRef.current?.getTracks().forEach((track) => track.stop());
+    if (document.pictureInPictureElement) await document.exitPictureInPicture().catch(() => undefined);
+    setSpeakingSocket(false);
+    setIdleStateSocket('offline');
+    setLocalMediaStream(null);
+    setPreJoinStream(null);
+    setRemoteStreams({});
+    setActiveMediaRoom(null);
+    setExpandedRoom(null);
+    await fetch('/api/auth/logout', { method: 'POST', keepalive: true }).catch(() => undefined);
     disconnectSocket();
     autoJoinedUserRef.current = '';
     setCurrentUser(null);
@@ -660,12 +702,15 @@ export default function App() {
 
   const activeFloor = floors.find((floor) => floor.id === activeFloorId) || floors[0];
   const visibleRooms = activeFloor ? rooms.filter((room) => room.floorId === activeFloor.id) : rooms;
-  const personalPresenter = activeMediaRoom?.type === 'personal'
-    ? users.find((user) => (roomOccupancyMap[activeMediaRoom.id] || []).includes(user.id) && presences[user.id]?.isSharingScreen)
-    : undefined;
-  const personalPresentationStream = personalPresenter
-    ? personalPresenter.id === currentUser.id ? localMediaStream : remoteStreams[personalPresenter.id]
-    : undefined;
+  const personalMediaParticipants: PersonalOfficeMediaParticipant[] = activeMediaRoom?.type === 'personal'
+    ? (roomOccupancyMap[activeMediaRoom.id] || []).flatMap((userId) => {
+      const user = users.find((item) => item.id === userId);
+      const presence = presences[userId];
+      const stream = userId === currentUser.id ? localMediaStream : remoteStreams[userId];
+      if (!user || !stream || (!presence?.isCameraOn && !presence?.isSharingScreen) || !stream.getVideoTracks().some((track) => track.readyState === 'live')) return [];
+      return [{ user, stream, isLocal: userId === currentUser.id, isCameraOn: Boolean(presence.isCameraOn), isSharingScreen: Boolean(presence.isSharingScreen) }];
+    })
+    : [];
 
   return (
     <div className="m-1 h-[calc(100dvh-8px)] bg-[#08090b] text-zinc-100 flex flex-col relative overflow-hidden rounded-[20px] border border-white/[.1] shadow-[0_35px_120px_rgba(0,0,0,.7)] sm:m-2 sm:h-[calc(100dvh-16px)] sm:rounded-[28px]" style={{ backgroundImage: 'radial-gradient(circle at 50% -25%,rgba(116,89,47,.12),transparent 35%)' }}>
@@ -683,8 +728,9 @@ export default function App() {
         </aside>
       </div>
 
-      <BottomToolbar currentPresence={currentPresence} onUpdateStatus={updateStatus} onSendGlobalReaction={(emoji) => sendReaction(emoji)} onOpenShelf={() => setShelfWindowOpen((value) => !value)} shelfOpen={shelfWindowOpen} shelfLabel={`Open ${(activeMediaRoom?.type === 'personal' ? users.find((user) => user.id === activeMediaRoom.ownerUserId)?.name : currentUser.name) || currentUser.name}'s shelf`} canShareScreen={Boolean(activeMediaRoom && activeMediaRoom.type !== 'personal')} voiceOnly={activeMediaRoom?.type === 'personal'} onOpenCalendar={() => setCalendarWindowOpen((value) => !value)} onOpenStories={() => setStoriesWindowOpen((value) => !value)} calendarOpen={calendarWindowOpen} storiesOpen={storiesWindowOpen} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectActiveDevice('audio', id)} onSelectVideoDevice={(id) => void selectActiveDevice('video', id)} isOwner={currentUser.isAdmin} ownerDashboardOpen={isUserManagementOpen} onOpenOwnerDashboard={() => setIsUserManagementOpen(true)} />
-      {personalPresenter && personalPresentationStream && <PersonalOfficePresentation presenter={personalPresenter} stream={personalPresentationStream} isLocal={personalPresenter.id === currentUser.id} onStop={() => updateStatus({ isSharingScreen: false })} />}
+      <BottomToolbar currentPresence={currentPresence} onUpdateStatus={updateStatus} onSendGlobalReaction={(emoji) => sendReaction(emoji)} onOpenShelf={() => setShelfWindowOpen((value) => !value)} shelfOpen={shelfWindowOpen} shelfLabel={`Open ${(activeMediaRoom?.type === 'personal' ? users.find((user) => user.id === activeMediaRoom.ownerUserId)?.name : currentUser.name) || currentUser.name}'s shelf`} canShareScreen={Boolean(activeMediaRoom)} onOpenCalendar={() => setCalendarWindowOpen((value) => !value)} onOpenStories={() => setStoriesWindowOpen((value) => !value)} calendarOpen={calendarWindowOpen} storiesOpen={storiesWindowOpen} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectActiveDevice('audio', id)} onSelectVideoDevice={(id) => void selectActiveDevice('video', id)} isOwner={currentUser.isAdmin} ownerDashboardOpen={isUserManagementOpen} onOpenOwnerDashboard={() => setIsUserManagementOpen(true)} onRequestPictureInPicture={() => window.dispatchEvent(new Event('office:request-picture-in-picture'))} />
+      {!!personalMediaParticipants.length && <PersonalOfficePresentation participants={personalMediaParticipants} onStopCamera={() => updateStatus({ isCameraOn: false })} onStopScreenShare={() => updateStatus({ isSharingScreen: false })} />}
+      <OfficePictureInPicture enabled={Boolean(activeMediaRoom?.type === 'personal' && !personalMediaParticipants.length)} profile={currentUser} muted={Boolean(currentPresence?.isMuted)} speaking={Boolean(speakingUsers[currentUser.id])} localStream={localMediaStream} />
       {activeMediaRoom?.type === 'personal' && (
         <div className="sr-only" aria-label="Personal office audio connections">
           {Object.entries(remoteStreams).map(([peerId, stream]) => <RemoteOfficeAudio key={peerId} peerId={peerId} stream={stream} />)}

@@ -194,13 +194,61 @@ export class WebRTCManager {
   }
 
   public async setAudioDevice(deviceId: string): Promise<MediaStream | null> {
-    await this.setAudioEnabled(false);
-    return this.setAudioEnabled(true, deviceId);
+    const previousTrack = this.localStream?.getAudioTracks()[0];
+    if (previousTrack?.readyState === 'live') {
+      try {
+        await previousTrack.applyConstraints(deviceId ? { deviceId: { exact: deviceId } } : {});
+        return this.getPreviewStream();
+      } catch {
+        // Some browsers cannot change a live input in place; acquire before replacing it.
+      }
+    }
+    const acquired = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) },
+      video: false,
+    });
+    const nextTrack = acquired.getAudioTracks()[0];
+    if (!nextTrack) throw new Error('The selected microphone is unavailable.');
+    try {
+      await Promise.all(Array.from(this.mediaSenders.values()).map(({ audio }) => audio.replaceTrack(nextTrack)));
+      if (!this.localStream) this.localStream = new MediaStream();
+      if (previousTrack) this.localStream.removeTrack(previousTrack);
+      this.localStream.addTrack(nextTrack);
+      previousTrack?.stop();
+      return this.getPreviewStream();
+    } catch (error) {
+      nextTrack.stop();
+      throw error;
+    }
   }
 
   public async setVideoDevice(deviceId: string): Promise<MediaStream | null> {
-    await this.setVideoEnabled(false);
-    return this.setVideoEnabled(true, deviceId);
+    const previousTrack = this.localStream?.getVideoTracks()[0];
+    if (previousTrack?.readyState === 'live') {
+      try {
+        await previousTrack.applyConstraints(deviceId ? { deviceId: { exact: deviceId } } : {});
+        return this.getPreviewStream();
+      } catch {
+        // Fall back to acquiring and atomically replacing the active camera track.
+      }
+    }
+    const acquired = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', ...(deviceId ? { deviceId: { exact: deviceId } } : {}) },
+    });
+    const nextTrack = acquired.getVideoTracks()[0];
+    if (!nextTrack) throw new Error('The selected camera is unavailable.');
+    try {
+      if (!this.screenTrack) await Promise.all(Array.from(this.mediaSenders.values()).map(({ video }) => video.replaceTrack(nextTrack)));
+      if (!this.localStream) this.localStream = new MediaStream();
+      if (previousTrack) this.localStream.removeTrack(previousTrack);
+      this.localStream.addTrack(nextTrack);
+      previousTrack?.stop();
+      return this.getPreviewStream();
+    } catch (error) {
+      nextTrack.stop();
+      throw error;
+    }
   }
 
   public async startScreenShare(): Promise<MediaStream> {
@@ -248,6 +296,18 @@ export class WebRTCManager {
 
   public suspendForTabTakeover() {
     this.releaseResources();
+  }
+
+  public removePeer(peerId: string) {
+    const connection = this.peerConnections.get(peerId);
+    connection?.close();
+    this.peerConnections.delete(peerId);
+    this.mediaSenders.delete(peerId);
+    this.remotePeerStreams.delete(peerId);
+    this.pendingIceCandidates.delete(peerId);
+    this.makingOffers.delete(peerId);
+    this.ignoredOffers.delete(peerId);
+    this.onPeerLeftCallback?.(peerId);
   }
 
   private releaseResources() {
@@ -312,19 +372,10 @@ export class WebRTCManager {
       }
     });
 
-    s.on('webrtc:peer-left', ({ peerId }) => {
+    s.on('webrtc:peer-left', ({ peerId, roomId }) => {
+      if (roomId && roomId !== this.roomId) return;
       console.log('[WebRTC] Peer left:', peerId);
-      const pc = this.peerConnections.get(peerId);
-      if (pc) {
-        pc.close();
-        this.peerConnections.delete(peerId);
-      }
-      this.mediaSenders.delete(peerId);
-      this.remotePeerStreams.delete(peerId);
-      this.pendingIceCandidates.delete(peerId);
-      this.makingOffers.delete(peerId);
-      this.ignoredOffers.delete(peerId);
-      this.onPeerLeftCallback?.(peerId);
+      this.removePeer(peerId);
     });
   }
 

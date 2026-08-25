@@ -752,12 +752,6 @@ async function startServer() {
     socket.on('user:update_status', ({ updates } = {}) => runSocket(socket, async () => {
       const allowed = ['isMuted', 'isCameraOn', 'isSharingScreen'];
       const clean = Object.fromEntries(Object.entries(updates || {}).filter(([key]) => allowed.includes(key)));
-      const presence = (await db.getPresences())[user.id];
-      const currentRoom = (await db.getRooms()).find((room) => room.id === presence?.currentRoomId);
-      if (currentRoom?.type === 'personal') {
-        clean.isCameraOn = false;
-        clean.isSharingScreen = false;
-      }
       io.emit('presence:updated', await db.updatePresence(user.id, clean));
     }));
 
@@ -835,7 +829,10 @@ async function startServer() {
       readyUsers.add(user.id);
       mediaReadyByRoom.set(roomId, readyUsers);
       for (const existingUserId of existingReadyUsers) {
-        for (const socketId of userSockets.get(existingUserId) || []) io.to(socketId).emit('webrtc:peer-joined', { roomId, peerId: user.id, socketId: socket.id });
+        for (const socketId of userSockets.get(existingUserId) || []) {
+          const existingSocket = io.sockets.sockets.get(socketId);
+          if (existingSocket?.rooms.has(roomId)) io.to(socketId).emit('webrtc:peer-joined', { roomId, peerId: user.id, socketId: socket.id });
+        }
       }
     }));
 
@@ -980,13 +977,20 @@ async function startServer() {
     }));
 
     for (const event of ['webrtc:offer', 'webrtc:answer', 'webrtc:ice-candidate'] as const) {
-      socket.on(event, (payload = {}) => {
-        const outbound = { ...payload, senderId: user.id, socketId: socket.id };
-        const targetSockets = payload.targetId ? userSockets.get(payload.targetId) : undefined;
-        if (targetSockets?.size) {
-          for (const socketId of targetSockets) io.to(socketId).emit(event, outbound);
-        } else if (payload.roomId) socket.to(payload.roomId).emit(event, outbound);
-      });
+      socket.on(event, (payload = {}) => runSocket(socket, async () => {
+        const roomId = typeof payload.roomId === 'string' ? payload.roomId : '';
+        const targetId = typeof payload.targetId === 'string' ? payload.targetId : '';
+        if (!roomId || !targetId || targetId === user.id || !socket.rooms.has(roomId)) return;
+        const presences = await db.getPresences();
+        if (presences[user.id]?.currentRoomId !== roomId || presences[targetId]?.currentRoomId !== roomId) return;
+        const readyUsers = mediaReadyByRoom.get(roomId);
+        if (!readyUsers?.has(user.id) || !readyUsers.has(targetId)) return;
+        const outbound = { ...payload, roomId, targetId, senderId: user.id, socketId: socket.id };
+        for (const socketId of userSockets.get(targetId) || []) {
+          const targetSocket = io.sockets.sockets.get(socketId);
+          if (targetSocket?.rooms.has(roomId)) io.to(socketId).emit(event, outbound);
+        }
+      }));
     }
 
     socket.on('disconnect', () => runSocket(socket, async () => {

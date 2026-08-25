@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PresenceStatus } from '../types';
-import { BriefcaseBusiness, CalendarDays, Camera, CameraOff, ChevronDown, CircleDotDashed, CirclePlay, LayoutDashboard, LibraryBig, Mic, MicOff, Monitor, RadioTower, Smile, Sparkles, Video } from 'lucide-react';
+import { BriefcaseBusiness, CalendarDays, Camera, CameraOff, ChevronDown, CircleDotDashed, CirclePlay, LayoutDashboard, LibraryBig, Mic, MicOff, Monitor, PictureInPicture2, RadioTower, Smile, Sparkles, Video } from 'lucide-react';
 
 interface BottomToolbarProps {
   currentPresence?: PresenceStatus;
@@ -10,7 +10,6 @@ interface BottomToolbarProps {
   shelfOpen?: boolean;
   shelfLabel?: string;
   canShareScreen?: boolean;
-  voiceOnly?: boolean;
   onOpenCalendar: () => void;
   onOpenStories: () => void;
   calendarOpen?: boolean;
@@ -24,6 +23,7 @@ interface BottomToolbarProps {
   isOwner?: boolean;
   ownerDashboardOpen?: boolean;
   onOpenOwnerDashboard?: () => void;
+  onRequestPictureInPicture?: () => void;
 }
 
 export const BottomToolbar: React.FC<BottomToolbarProps> = ({
@@ -34,7 +34,6 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
   shelfOpen = false,
   shelfLabel = 'Open my shelf',
   canShareScreen = false,
-  voiceOnly = false,
   onOpenCalendar,
   onOpenStories,
   calendarOpen = false,
@@ -48,6 +47,7 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
   isOwner = false,
   ownerDashboardOpen = false,
   onOpenOwnerDashboard,
+  onRequestPictureInPicture,
 }) => {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [utilityNotice, setUtilityNotice] = useState('');
@@ -81,7 +81,7 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
       </div>
 
       {/* Center Controls: Mic, Camera, Reaction, Screen Share */}
-      <div className={`absolute top-7 flex -translate-x-1/2 -translate-y-1/2 items-center space-x-0 rounded-[16px] border border-white/[.09] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.42)] sm:left-1/2 sm:top-1/2 sm:space-x-1 sm:rounded-[18px] sm:p-1 ${voiceOnly ? 'left-1/2' : 'left-[56%]'}`}>
+      <div className="absolute left-1/2 top-7 flex -translate-x-1/2 -translate-y-1/2 items-center space-x-0 rounded-[16px] border border-white/[.09] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.42)] sm:top-1/2 sm:space-x-1 sm:rounded-[18px] sm:p-1">
         {/* Mic Toggle */}
         <div className={`flex h-8 overflow-hidden rounded-xl border sm:h-9 ${isMuted ? 'border-red-500/40 bg-red-500/20 text-red-400' : 'border-[#2D2D30] bg-[#1A1A1C] text-[#E0E0E0]'}`}>
           <button
@@ -101,7 +101,7 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
         </div>
 
         {/* Camera Toggle */}
-        {!voiceOnly && <div className={`flex h-8 overflow-hidden rounded-xl border sm:h-9 ${isCameraOn ? 'border-emerald-500/40 bg-emerald-500/20 text-emerald-400' : 'border-[#2D2D30] bg-[#1A1A1C] text-gray-500'}`}>
+        <div className={`flex h-8 overflow-hidden rounded-xl border sm:h-9 ${isCameraOn ? 'border-emerald-500/40 bg-emerald-500/20 text-emerald-400' : 'border-[#2D2D30] bg-[#1A1A1C] text-gray-500'}`}>
           <button
             id="btn-toggle-camera"
             onClick={toggleCamera}
@@ -116,9 +116,8 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
               {videoDevices.length ? videoDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>) : <option value="">Default camera</option>}
             </select>
           </label>
-        </div>}
+        </div>
 
-        {!voiceOnly && <>
         <div className="mx-0.5 h-6 w-px bg-[#2D2D30] sm:mx-1"></div>
 
         {/* Screen Share Toggle */}
@@ -166,12 +165,12 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
             </div>
           )}
         </div>
-        </>}
       </div>
 
       {/* Right: compact utility dock and shelf */}
       <div className="absolute right-2 top-7 flex -translate-y-1/2 items-center gap-0.5 rounded-[16px] border border-white/[.09] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.42)] sm:right-3 sm:top-1/2 sm:rounded-[18px] sm:p-1">
         {utilityNotice && <span role="status" className="absolute bottom-12 right-0 whitespace-nowrap rounded-xl border border-white/[.09] bg-[#17181d]/98 px-3 py-2 text-[10px] text-zinc-300 shadow-xl">{utilityNotice}</span>}
+        <button type="button" onClick={onRequestPictureInPicture} aria-label="Open mini office" title="Open mini office" className="flex h-8 w-8 items-center justify-center rounded-xl text-cyan-300/80 transition hover:bg-cyan-300/[.08] hover:text-cyan-200 md:hidden"><PictureInPicture2 className="h-4 w-4" /></button>
         {isOwner && <button type="button" onClick={onOpenOwnerDashboard} aria-label="Owner dashboard" title="Owner dashboard" className={`flex h-8 w-8 items-center justify-center rounded-xl transition ${ownerDashboardOpen ? 'bg-amber-300/10 text-amber-300' : 'text-amber-300/75 hover:bg-amber-300/[.08] hover:text-amber-200'}`}><LayoutDashboard className="h-4 w-4" /></button>}
         {futureTools.map(({ label, icon: Icon }, index) => <button key={label} type="button" onClick={() => showUtilityNotice(label)} aria-label={label} title={`${label} · coming soon`} className={`h-8 w-8 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[.06] hover:text-zinc-200 ${index < 2 ? 'hidden md:flex' : 'hidden lg:flex'}`}><Icon className="h-4 w-4" /></button>)}
         <button
