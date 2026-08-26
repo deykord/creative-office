@@ -435,7 +435,7 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
           <button
             onClick={() => onUpdateStatus({ isSharingScreen: !currentPresence?.isSharingScreen })}
             className={`w-11 h-11 rounded-xl flex items-center justify-center transition border ${currentPresence?.isSharingScreen ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' : 'bg-[#242427] hover:bg-[#2C2C30] text-zinc-200 border-[#3A3A40]'}`}
-            title={currentPresence?.isSharingScreen ? 'Stop presenting' : 'Present your screen'}
+            title={currentPresence?.isSharingScreen ? 'Stop presenting' : 'Present screen and sound'}
           >
             <Monitor className="w-5 h-5" />
           </button></>}

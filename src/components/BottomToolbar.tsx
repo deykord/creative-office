@@ -129,7 +129,7 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
               ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 animate-pulse'
               : 'bg-[#1A1A1C] text-[#E0E0E0] border-[#2D2D30] hover:bg-[#242427]'
           }`}
-          title={isSharingScreen ? 'Stop Screen Share' : 'Share Screen'}
+          title={isSharingScreen ? 'Stop screen sharing' : 'Share screen and sound'}
         >
           <Monitor className="w-4.5 h-4.5" />
         </button>}

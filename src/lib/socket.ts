@@ -96,6 +96,10 @@ export class WebRTCManager {
   private remotePeerStreams: Map<string, MediaStream> = new Map();
   private localStream: MediaStream | null = null;
   private screenTrack: MediaStreamTrack | null = null;
+  private screenAudioTrack: MediaStreamTrack | null = null;
+  private mixedAudioTrack: MediaStreamTrack | null = null;
+  private screenAudioContext: AudioContext | null = null;
+  private screenAudioSources: MediaStreamAudioSourceNode[] = [];
   private pendingIceCandidates: Map<string, RTCIceCandidateInit[]> = new Map();
   private makingOffers: Set<string> = new Set();
   private ignoredOffers: Set<string> = new Set();
@@ -133,7 +137,7 @@ export class WebRTCManager {
   }
 
   private async syncLocalTracksToPeers() {
-    const audioTrack = this.localStream?.getAudioTracks()[0] || null;
+    const audioTrack = this.getOutgoingAudioTrack();
     const videoTrack = this.screenTrack || this.localStream?.getVideoTracks()[0] || null;
     await Promise.allSettled(Array.from(this.mediaSenders.values()).flatMap(({ audio, video }) => [audio.replaceTrack(audioTrack), video.replaceTrack(videoTrack)]));
   }
@@ -151,10 +155,11 @@ export class WebRTCManager {
     const existing = this.localStream?.getAudioTracks()[0];
     if (!enabled) {
       if (existing) {
-        await Promise.all(Array.from(this.mediaSenders.values()).map(({ audio }) => audio.replaceTrack(null)));
         existing.stop();
         this.localStream?.removeTrack(existing);
       }
+      if (this.screenAudioTrack?.readyState === 'live') await this.rebuildScreenAudioMix();
+      else await this.replaceOutgoingAudioTrack(null);
       return this.getPreviewStream();
     }
     if (existing?.readyState === 'live') return this.getPreviewStream();
@@ -166,7 +171,8 @@ export class WebRTCManager {
     if (!track) throw new Error('No microphone is available.');
     if (!this.localStream) this.localStream = new MediaStream();
     this.localStream.addTrack(track);
-    await Promise.all(Array.from(this.mediaSenders.values()).map(({ audio }) => audio.replaceTrack(track)));
+    if (this.screenAudioTrack?.readyState === 'live') await this.rebuildScreenAudioMix();
+    else await this.replaceOutgoingAudioTrack(track);
     return this.getPreviewStream();
   }
 
@@ -210,10 +216,11 @@ export class WebRTCManager {
     const nextTrack = acquired.getAudioTracks()[0];
     if (!nextTrack) throw new Error('The selected microphone is unavailable.');
     try {
-      await Promise.all(Array.from(this.mediaSenders.values()).map(({ audio }) => audio.replaceTrack(nextTrack)));
       if (!this.localStream) this.localStream = new MediaStream();
       if (previousTrack) this.localStream.removeTrack(previousTrack);
       this.localStream.addTrack(nextTrack);
+      if (this.screenAudioTrack?.readyState === 'live') await this.rebuildScreenAudioMix();
+      else await this.replaceOutgoingAudioTrack(nextTrack);
       previousTrack?.stop();
       return this.getPreviewStream();
     } catch (error) {
@@ -255,22 +262,103 @@ export class WebRTCManager {
     if (!window.isSecureContext || !navigator.mediaDevices?.getDisplayMedia) {
       throw new Error('Screen sharing requires a secure HTTPS connection.');
     }
-    const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    const displayStream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: true,
+      systemAudio: 'include',
+      surfaceSwitching: 'include',
+    } as DisplayMediaStreamOptions & { systemAudio: 'include'; surfaceSwitching: 'include' });
     const track = displayStream.getVideoTracks()[0];
     if (!track) throw new Error('No screen was selected.');
     this.screenTrack?.stop();
+    this.screenAudioTrack?.stop();
     this.screenTrack = track;
-    await this.replaceOutgoingVideoTrack(track);
-    track.addEventListener('ended', () => this.stopScreenShare());
+    this.screenAudioTrack = displayStream.getAudioTracks()[0] || null;
+    try {
+      await this.replaceOutgoingVideoTrack(track);
+      if (this.screenAudioTrack) await this.rebuildScreenAudioMix();
+    } catch (error) {
+      this.screenTrack = null;
+      this.screenAudioTrack = null;
+      displayStream.getTracks().forEach((displayTrack) => displayTrack.stop());
+      await this.disposeScreenAudioMix();
+      await this.replaceOutgoingVideoTrack(this.localStream?.getVideoTracks()[0] || null);
+      await this.replaceOutgoingAudioTrack(this.localStream?.getAudioTracks()[0] || null);
+      throw error;
+    }
+    const sharedAudio = this.screenAudioTrack;
+    sharedAudio?.addEventListener('ended', () => {
+      if (this.screenAudioTrack !== sharedAudio) return;
+      this.screenAudioTrack = null;
+      void this.disposeScreenAudioMix().then(() => this.replaceOutgoingAudioTrack(this.localStream?.getAudioTracks()[0] || null));
+    }, { once: true });
+    track.addEventListener('ended', () => { void this.stopScreenShare(); }, { once: true });
     return new MediaStream([track, ...(this.localStream?.getAudioTracks() || [])]);
   }
 
   public async stopScreenShare(): Promise<MediaStream | null> {
     const previous = this.screenTrack;
+    const previousAudio = this.screenAudioTrack;
     this.screenTrack = null;
+    this.screenAudioTrack = null;
+    await this.disposeScreenAudioMix();
     await this.replaceOutgoingVideoTrack(this.localStream?.getVideoTracks()[0] || null);
+    await this.replaceOutgoingAudioTrack(this.localStream?.getAudioTracks()[0] || null);
     if (previous?.readyState === 'live') previous.stop();
+    if (previousAudio?.readyState === 'live') previousAudio.stop();
     return this.localStream;
+  }
+
+  public hasScreenShareAudio(): boolean {
+    return this.screenAudioTrack?.readyState === 'live';
+  }
+
+  private getOutgoingAudioTrack(): MediaStreamTrack | null {
+    if (this.mixedAudioTrack?.readyState === 'live') return this.mixedAudioTrack;
+    return this.localStream?.getAudioTracks()[0] || null;
+  }
+
+  private async rebuildScreenAudioMix() {
+    const sharedAudio = this.screenAudioTrack?.readyState === 'live' ? this.screenAudioTrack : null;
+    if (!sharedAudio) {
+      await this.disposeScreenAudioMix();
+      await this.replaceOutgoingAudioTrack(this.localStream?.getAudioTracks()[0] || null);
+      return;
+    }
+    await this.disposeScreenAudioMix();
+    const context = new AudioContext();
+    const destination = context.createMediaStreamDestination();
+    const inputs = [this.localStream?.getAudioTracks()[0], sharedAudio].filter((track): track is MediaStreamTrack => Boolean(track?.readyState === 'live'));
+    const sources = inputs.map((input) => {
+      const source = context.createMediaStreamSource(new MediaStream([input]));
+      source.connect(destination);
+      return source;
+    });
+    const mixedTrack = destination.stream.getAudioTracks()[0];
+    if (!mixedTrack) {
+      sources.forEach((source) => source.disconnect());
+      await context.close();
+      throw new Error('Shared audio could not be prepared.');
+    }
+    this.screenAudioContext = context;
+    this.screenAudioSources = sources;
+    this.mixedAudioTrack = mixedTrack;
+    await context.resume();
+    await this.replaceOutgoingAudioTrack(mixedTrack);
+  }
+
+  private async disposeScreenAudioMix() {
+    this.screenAudioSources.forEach((source) => source.disconnect());
+    this.screenAudioSources = [];
+    this.mixedAudioTrack?.stop();
+    this.mixedAudioTrack = null;
+    const context = this.screenAudioContext;
+    this.screenAudioContext = null;
+    if (context && context.state !== 'closed') await context.close().catch(() => undefined);
+  }
+
+  private async replaceOutgoingAudioTrack(track: MediaStreamTrack | null) {
+    await Promise.all(Array.from(this.mediaSenders.values()).map(({ audio }) => audio.replaceTrack(track)));
   }
 
   private async replaceOutgoingVideoTrack(track: MediaStreamTrack | null) {
@@ -320,6 +408,9 @@ export class WebRTCManager {
     this.ignoredOffers.clear();
     this.screenTrack?.stop();
     this.screenTrack = null;
+    this.screenAudioTrack?.stop();
+    this.screenAudioTrack = null;
+    void this.disposeScreenAudioMix();
     if (this.localStream) {
       this.localStream.getTracks().forEach((t) => t.stop());
       this.localStream = null;
@@ -388,13 +479,14 @@ export class WebRTCManager {
       iceServers: rtcIceServers,
     });
 
-    const audioTracks = this.localStream?.getAudioTracks() || [];
+    const audioTrack = this.getOutgoingAudioTrack();
     const videoTrack = this.screenTrack || this.localStream?.getVideoTracks()[0];
-    const audioSender = audioTracks[0]
-      ? pc.addTrack(audioTracks[0], this.localStream!)
+    const outgoingStream = new MediaStream([audioTrack, videoTrack].filter((track): track is MediaStreamTrack => Boolean(track)));
+    const audioSender = audioTrack
+      ? pc.addTrack(audioTrack, outgoingStream)
       : pc.addTransceiver('audio', { direction: 'sendrecv' }).sender;
     const videoSender = videoTrack
-      ? pc.addTrack(videoTrack, this.screenTrack ? new MediaStream([videoTrack, ...audioTracks]) : this.localStream!)
+      ? pc.addTrack(videoTrack, outgoingStream)
       : pc.addTransceiver('video', { direction: 'sendrecv' }).sender;
     this.mediaSenders.set(targetPeerId, { audio: audioSender, video: videoSender });
 

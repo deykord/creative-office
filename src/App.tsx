@@ -407,7 +407,7 @@ export default function App() {
       if (updates.isSharingScreen) {
         manager.startScreenShare().then((stream) => {
           setLocalMediaStream(stream);
-          setMediaError('');
+          setMediaError(manager.hasScreenShareAudio() ? '' : 'Screen sharing started without sound. In Chrome, share a tab and enable “Also share tab audio”, or enable system audio when sharing your screen.');
           updateLocalPresence({ isSharingScreen: true });
           updateUserStatus(currentUser.id, { isSharingScreen: true });
           stream.getVideoTracks()[0]?.addEventListener('ended', () => {
