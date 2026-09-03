@@ -28,6 +28,12 @@ interface Props {
 
 const emptyRoom = { name: '', description: '', type: 'meeting' as RoomType, capacity: 12, floorId: '' };
 const emptyFloor = { name: '', description: '', color: '#D9A34A' };
+type AnalyticsRange = 'day' | 'week' | 'month' | 'custom';
+const dateInputValue = (daysAgo = 0) => {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - daysAgo);
+  return date.toISOString().slice(0, 10);
+};
 
 const defaultOwnerWindowBounds = () => {
   const width = Math.min(1180, window.innerWidth - 24);
@@ -45,13 +51,15 @@ async function api(url: string, options?: RequestInit) {
 export const UserManagementModal: React.FC<Props> = ({ isOpen, onClose, users, rooms, floors, currentUser, onUsersChanged, onRoomsChanged, onFloorsChanged }) => {
   const [tab, setTab] = useState<'overview' | 'users' | 'rooms' | 'floors'>('overview');
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [analyticsDays, setAnalyticsDays] = useState<7 | 30 | 90>(7);
+  const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>('week');
+  const [customFrom, setCustomFrom] = useState(() => dateInputValue(6));
+  const [customTo, setCustomTo] = useState(() => dateInputValue());
   const [analyticsUserId, setAnalyticsUserId] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [userForm, setUserForm] = useState({ name: '', username: '', role: 'Member', gender: 'male', password: '', isAdmin: false, isActive: true, defaultFloorId: '' });
+  const [userForm, setUserForm] = useState({ name: '', username: '', role: 'Member', gender: 'male', password: '', isAdmin: false, canViewAnalytics: false, isActive: true, defaultFloorId: '' });
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [roomForm, setRoomForm] = useState(emptyRoom);
   const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
@@ -63,16 +71,19 @@ export const UserManagementModal: React.FC<Props> = ({ isOpen, onClose, users, r
   const selectedUser = users.find((user) => user.id === selectedUserId);
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId);
   const selectedFloor = floors.find((floor) => floor.id === selectedFloorId);
+  const analyticsOnly = !currentUser.isAdmin && Boolean(currentUser.canViewAnalytics);
   const loadAnalytics = async () => {
-    const params = new URLSearchParams({ days: String(analyticsDays) });
+    const params = new URLSearchParams({ range: analyticsRange });
+    if (analyticsRange === 'custom') { params.set('from', customFrom); params.set('to', customTo); }
     if (analyticsUserId) params.set('userId', analyticsUserId);
     try { setAnalytics(await api(`/api/admin/analytics?${params}`)); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Could not load analytics'); }
   };
 
-  useEffect(() => { if (isOpen) loadAnalytics(); }, [isOpen, analyticsDays, analyticsUserId]);
+  useEffect(() => { if (isOpen) loadAnalytics(); }, [isOpen, analyticsRange, customFrom, customTo, analyticsUserId]);
+  useEffect(() => { if (analyticsOnly) setTab('overview'); }, [analyticsOnly, isOpen]);
   useEffect(() => {
     if (!selectedUser) return;
-    setUserForm({ name: selectedUser.name, username: selectedUser.username, role: selectedUser.role, gender: selectedUser.gender || 'male', password: '', isAdmin: Boolean(selectedUser.isAdmin), isActive: selectedUser.isActive !== false, defaultFloorId: selectedUser.defaultFloorId || floors[0]?.id || '' });
+    setUserForm({ name: selectedUser.name, username: selectedUser.username, role: selectedUser.role, gender: selectedUser.gender || 'male', password: '', isAdmin: Boolean(selectedUser.isAdmin), canViewAnalytics: Boolean(selectedUser.canViewAnalytics), isActive: selectedUser.isActive !== false, defaultFloorId: selectedUser.defaultFloorId || floors[0]?.id || '' });
   }, [selectedUserId, users]);
   useEffect(() => {
     if (!selectedRoom) return;
@@ -100,7 +111,7 @@ export const UserManagementModal: React.FC<Props> = ({ isOpen, onClose, users, r
     }
     await refreshUsers();
     setSelectedUserId(null);
-    setUserForm({ name: '', username: '', role: 'Member', gender: 'male', password: '', isAdmin: false, isActive: true, defaultFloorId: floors[0]?.id || '' });
+    setUserForm({ name: '', username: '', role: 'Member', gender: 'male', password: '', isAdmin: false, canViewAnalytics: false, isActive: true, defaultFloorId: floors[0]?.id || '' });
   }, selectedUserId ? 'Account updated.' : 'Account created.');
 
   const deleteUser = () => {
@@ -154,25 +165,25 @@ export const UserManagementModal: React.FC<Props> = ({ isOpen, onClose, users, r
     { id: 'users' as const, label: 'Accounts & access', icon: UserCog },
     { id: 'rooms' as const, label: 'Rooms', icon: DoorOpen },
     { id: 'floors' as const, label: 'Floors', icon: Building2 },
-  ];
+  ].filter((item) => !analyticsOnly || item.id === 'overview');
 
   return (
-    <section role="dialog" aria-label="Owner console" data-floating-window="owner-console" data-window-interacting={ownerWindow.interacting ? 'true' : 'false'} style={{ left: ownerWindow.bounds.x, top: ownerWindow.bounds.y, width: ownerWindow.bounds.width, height: ownerWindow.bounds.height }} className={`fixed z-[92] ${ownerWindow.interacting ? '' : 'transition-[left,top,width,height] duration-150'}`}>
+    <section role="dialog" aria-label={analyticsOnly ? 'Analytics dashboard' : 'Owner console'} data-floating-window="owner-console" data-window-interacting={ownerWindow.interacting ? 'true' : 'false'} style={{ left: ownerWindow.bounds.x, top: ownerWindow.bounds.y, width: ownerWindow.bounds.width, height: ownerWindow.bounds.height }} className={`fixed z-[92] ${ownerWindow.interacting ? '' : 'transition-[left,top,width,height] duration-150'}`}>
       <div className="relative h-full w-full bg-[#0F0F12]/98 border border-[#2D2D30] rounded-2xl md:rounded-[28px] shadow-[0_35px_120px_rgba(0,0,0,.78)] overflow-hidden flex backdrop-blur-2xl">
         <aside className="w-20 md:w-64 bg-[#141418] border-r border-zinc-800 p-3 md:p-5 flex flex-col">
-          <div className="flex items-center gap-3 px-1 mb-8"><div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0"><ShieldCheck className="w-5 h-5 text-amber-400" /></div><div className="hidden md:block"><p className="text-sm font-bold">Owner console</p><p className="text-[10px] text-zinc-500 uppercase tracking-wider">Business controls</p></div></div>
+          <div className="flex items-center gap-3 px-1 mb-8"><div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0"><ShieldCheck className="w-5 h-5 text-amber-400" /></div><div className="hidden md:block"><p className="text-sm font-bold">{analyticsOnly ? 'Analytics' : 'Owner console'}</p><p className="text-[10px] text-zinc-500 uppercase tracking-wider">{analyticsOnly ? 'View-only access' : 'Business controls'}</p></div></div>
           <nav aria-label="Owner dashboard sections" className="space-y-1">{tabs.map((item) => <button key={item.id} aria-label={item.label} aria-current={tab === item.id ? 'page' : undefined} onClick={() => { setTab(item.id); setError(''); }} className={`w-full flex items-center justify-center md:justify-start gap-3 px-3 py-3 rounded-xl text-sm transition ${tab === item.id ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'text-zinc-500 hover:text-white hover:bg-zinc-900 border border-transparent'}`}><item.icon className="w-4 h-4" /><span className="hidden md:inline">{item.label}</span></button>)}</nav>
-          <div className="mt-auto hidden md:block p-3 bg-zinc-950 border border-zinc-800 rounded-xl"><p className="text-xs text-zinc-300 truncate">{currentUser.name}</p><p className="text-[10px] text-amber-400 mt-1">Owner access</p></div>
+          <div className="mt-auto hidden md:block p-3 bg-zinc-950 border border-zinc-800 rounded-xl"><p className="text-xs text-zinc-300 truncate">{currentUser.name}</p><p className="text-[10px] text-amber-400 mt-1">{analyticsOnly ? 'Analytics viewer' : 'Owner access'}</p></div>
         </aside>
 
         <div className="flex-1 min-w-0 flex flex-col">
           <header data-window-drag-handle="true" onPointerDown={(event) => ownerWindow.startInteraction(event, 'drag')} className="h-20 touch-none cursor-move border-b border-zinc-800 px-5 md:px-8 flex items-center justify-between shrink-0 active:cursor-grabbing"><div><p className="text-[10px] uppercase tracking-[.22em] font-bold text-amber-400">Administration</p><h1 className="text-xl font-semibold mt-1">{tabs.find((item) => item.id === tab)?.label}</h1></div><button onClick={onClose} title="Close owner console" aria-label="Close owner console" className="p-2 rounded-xl border border-zinc-800 text-zinc-500 hover:text-white hover:bg-zinc-900"><X className="w-5 h-5" /></button></header>
           {(error || notice) && <div className={`mx-5 md:mx-8 mt-4 px-4 py-3 rounded-xl text-xs ${error ? 'bg-red-500/10 text-red-300 border border-red-500/20' : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'}`}>{error || notice}</div>}
           <div className="flex-1 overflow-y-auto p-5 md:p-8">
-            {tab === 'overview' && <Overview analytics={analytics} users={users} days={analyticsDays} userId={analyticsUserId} onDaysChange={setAnalyticsDays} onUserChange={setAnalyticsUserId} />}
+            {tab === 'overview' && <Overview analytics={analytics} users={users} range={analyticsRange} customFrom={customFrom} customTo={customTo} userId={analyticsUserId} onRangeChange={setAnalyticsRange} onCustomFromChange={setCustomFrom} onCustomToChange={setCustomTo} onUserChange={setAnalyticsUserId} />}
             {tab === 'users' && <div className="grid xl:grid-cols-[1fr_420px] gap-6">
               <div className="xl:col-span-2 rounded-2xl border border-indigo-300/15 bg-indigo-300/[.045] p-4 md:p-5"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-300/10 text-indigo-300"><Mail className="h-4 w-4"/></span><div><h2 className="text-sm font-semibold">Invite by email</h2><p className="text-xs text-zinc-600">Create a secure registration link valid for seven days.</p></div></div><div className="mt-4 grid gap-2 md:grid-cols-[1fr_150px_140px_auto]"><input type="email" placeholder="person@company.com" value={inviteForm.email} onChange={(event) => setInviteForm({ ...inviteForm, email: event.target.value })} className="rounded-xl border border-white/[.09] bg-black/25 px-3 py-2.5 text-xs outline-none"/><input placeholder="Role" value={inviteForm.role} onChange={(event) => setInviteForm({ ...inviteForm, role: event.target.value })} className="rounded-xl border border-white/[.09] bg-black/25 px-3 py-2.5 text-xs outline-none"/><select aria-label="Invitation floor" value={inviteForm.defaultFloorId || floors[0]?.id || ''} onChange={(event) => setInviteForm({ ...inviteForm, defaultFloorId: event.target.value })} className="rounded-xl border border-white/[.09] bg-black/25 px-3 py-2.5 text-xs">{floors.map((floor) => <option key={floor.id} value={floor.id}>{floor.name}</option>)}</select><button disabled={busy || !inviteForm.email} onClick={createInvitation} className="rounded-xl bg-indigo-300 px-4 py-2.5 text-xs font-semibold text-black disabled:opacity-40">Create invite</button></div>{inviteResult && <div className="mt-3 flex flex-col gap-2 rounded-xl border border-white/[.07] bg-black/20 p-3 md:flex-row md:items-center"><input readOnly aria-label="Registration URL" value={inviteResult.registrationUrl} className="min-w-0 flex-1 bg-transparent text-[10px] text-zinc-400 outline-none"/><button onClick={() => void navigator.clipboard.writeText(inviteResult.registrationUrl)} className="flex items-center justify-center gap-1.5 rounded-lg border border-white/[.08] px-3 py-2 text-[10px]"><Copy className="h-3 w-3"/>Copy link</button><a href={inviteResult.mailtoUrl} className="flex items-center justify-center gap-1.5 rounded-lg border border-indigo-300/20 px-3 py-2 text-[10px] text-indigo-200"><Mail className="h-3 w-3"/>Open email</a></div>}</div>
-              <div className="bg-[#141418] border border-zinc-800 rounded-2xl overflow-hidden"><div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between"><div><h2 className="text-sm font-semibold">Workspace accounts</h2><p className="text-xs text-zinc-600 mt-1">Roles and administrative access</p></div><button onClick={() => { setSelectedUserId(null); setUserForm({ name: '', username: '', role: 'Member', password: '', isAdmin: false, isActive: true, defaultFloorId: floors[0]?.id || '' }); }} className="flex items-center gap-2 px-3 py-2 bg-amber-500 text-black text-xs font-bold rounded-lg"><Plus className="w-3.5 h-3.5" /> New</button></div><div className="divide-y divide-zinc-800">{users.map((user) => <button key={user.id} onClick={() => { setSelectedUserId(user.id); setUserForm({ name: user.name, username: user.username, role: user.role, password: '', isAdmin: Boolean(user.isAdmin), isActive: user.isActive !== false, defaultFloorId: user.defaultFloorId || floors[0]?.id || '' }); }} className={`w-full p-4 flex items-center gap-3 text-left hover:bg-zinc-900/70 ${selectedUserId === user.id ? 'bg-amber-500/5' : ''}`}><img src={user.avatarUrl} alt="" className="w-10 h-10 rounded-full" /><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="text-sm font-medium truncate">{user.name}</p>{user.isAdmin && <span className="text-[9px] uppercase font-bold text-amber-400 bg-amber-500/10 px-1.5 rounded">Admin</span>}{user.isActive === false && <span className="text-[9px] uppercase font-bold text-red-400 bg-red-500/10 px-1.5 rounded">Disabled</span>}</div><p className="text-xs text-zinc-600 truncate">@{user.username} · {user.role} · {floors.find((floor) => floor.id === user.defaultFloorId)?.name || 'Unassigned'}</p></div><Edit3 className="w-4 h-4 text-zinc-700" /></button>)}</div></div>
+              <div className="bg-[#141418] border border-zinc-800 rounded-2xl overflow-hidden"><div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between"><div><h2 className="text-sm font-semibold">Workspace accounts</h2><p className="text-xs text-zinc-600 mt-1">Roles and administrative access</p></div><button onClick={() => { setSelectedUserId(null); setUserForm({ name: '', username: '', role: 'Member', password: '', isAdmin: false, canViewAnalytics: false, isActive: true, defaultFloorId: floors[0]?.id || '' }); }} className="flex items-center gap-2 px-3 py-2 bg-amber-500 text-black text-xs font-bold rounded-lg"><Plus className="w-3.5 h-3.5" /> New</button></div><div className="divide-y divide-zinc-800">{users.map((user) => <button key={user.id} onClick={() => { setSelectedUserId(user.id); setUserForm({ name: user.name, username: user.username, role: user.role, password: '', isAdmin: Boolean(user.isAdmin), canViewAnalytics: Boolean(user.canViewAnalytics), isActive: user.isActive !== false, defaultFloorId: user.defaultFloorId || floors[0]?.id || '' }); }} className={`w-full p-4 flex items-center gap-3 text-left hover:bg-zinc-900/70 ${selectedUserId === user.id ? 'bg-amber-500/5' : ''}`}><img src={user.avatarUrl} alt="" className="w-10 h-10 rounded-full" /><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="text-sm font-medium truncate">{user.name}</p>{user.isAdmin && <span className="text-[9px] uppercase font-bold text-amber-400 bg-amber-500/10 px-1.5 rounded">Admin</span>}{user.canViewAnalytics && !user.isAdmin && <span className="text-[9px] uppercase font-bold text-sky-300 bg-sky-400/10 px-1.5 rounded">Analytics</span>}{user.isActive === false && <span className="text-[9px] uppercase font-bold text-red-400 bg-red-500/10 px-1.5 rounded">Disabled</span>}</div><p className="text-xs text-zinc-600 truncate">@{user.username} · {user.role} · {floors.find((floor) => floor.id === user.defaultFloorId)?.name || 'Unassigned'}</p></div><Edit3 className="w-4 h-4 text-zinc-700" /></button>)}</div></div>
               <UserEditor form={userForm} setForm={setUserForm} selected={selectedUser} busy={busy} currentUser={currentUser} floors={floors} onSave={saveUser} onDelete={deleteUser} />
             </div>}
             {tab === 'rooms' && <div className="grid xl:grid-cols-[1fr_420px] gap-6">
@@ -188,7 +199,7 @@ export const UserManagementModal: React.FC<Props> = ({ isOpen, onClose, users, r
   );
 };
 
-function Overview({ analytics, users, days, userId, onDaysChange, onUserChange }: { analytics: Analytics | null; users: User[]; days: 7 | 30 | 90; userId: string; onDaysChange: (days: 7 | 30 | 90) => void; onUserChange: (id: string) => void }) {
+function Overview({ analytics, users, range, customFrom, customTo, userId, onRangeChange, onCustomFromChange, onCustomToChange, onUserChange }: { analytics: Analytics | null; users: User[]; range: AnalyticsRange; customFrom: string; customTo: string; userId: string; onRangeChange: (range: AnalyticsRange) => void; onCustomFromChange: (value: string) => void; onCustomToChange: (value: string) => void; onUserChange: (id: string) => void }) {
   const formatDuration = (seconds: number) => {
     const totalMinutes = Math.max(0, Math.round(Number(seconds || 0) / 60));
     const hours = Math.floor(totalMinutes / 60);
@@ -216,7 +227,7 @@ function Overview({ analytics, users, days, userId, onDaysChange, onUserChange }
     const blob = new Blob([rows.map((row) => row.map(escape).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `office-activity-${days}-days.csv`;
+    link.download = `office-activity-${analytics.range.from.slice(0, 10)}-to-${analytics.range.to.slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
   };
@@ -228,7 +239,8 @@ function Overview({ analytics, users, days, userId, onDaysChange, onUserChange }
       <div><h2 className="text-lg font-semibold">Workforce analytics</h2><p className="text-xs text-zinc-500 mt-1">Live attendance, member activity, room usage, and auditable session logs</p></div>
       <div className="flex flex-wrap items-center gap-2">
         <select aria-label="Filter analytics by member" value={userId} onChange={(event) => onUserChange(event.target.value)} className="h-9 bg-[#141418] border border-zinc-800 rounded-lg px-3 text-xs outline-none focus:border-amber-500"><option value="">All members</option>{users.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select>
-        <div className="flex bg-[#141418] border border-zinc-800 rounded-lg p-1">{([7, 30, 90] as const).map((value) => <button key={value} onClick={() => onDaysChange(value)} className={`px-3 py-1.5 rounded-md text-[11px] font-semibold transition ${days === value ? 'bg-amber-500 text-black' : 'text-zinc-500 hover:text-white'}`}>{value} days</button>)}</div>
+        <div className="flex bg-[#141418] border border-zinc-800 rounded-lg p-1">{(['day', 'week', 'month', 'custom'] as const).map((value) => <button key={value} onClick={() => onRangeChange(value)} className={`px-3 py-1.5 rounded-md text-[11px] font-semibold capitalize transition ${range === value ? 'bg-amber-500 text-black' : 'text-zinc-500 hover:text-white'}`}>{value}</button>)}</div>
+        {range === 'custom' && <div className="flex items-center gap-1.5"><input aria-label="Analytics start date" type="date" value={customFrom} max={customTo} onChange={(event) => onCustomFromChange(event.target.value)} className="h-9 rounded-lg border border-zinc-800 bg-[#141418] px-2 text-[11px] text-zinc-300 outline-none focus:border-amber-500"/><span className="text-[10px] text-zinc-600">to</span><input aria-label="Analytics end date" type="date" value={customTo} min={customFrom} max={dateInputValue()} onChange={(event) => onCustomToChange(event.target.value)} className="h-9 rounded-lg border border-zinc-800 bg-[#141418] px-2 text-[11px] text-zinc-300 outline-none focus:border-amber-500"/></div>}
         <button onClick={exportCsv} className="h-9 flex items-center gap-2 px-3 border border-zinc-800 rounded-lg text-xs text-zinc-400 hover:text-white hover:bg-zinc-900"><Download className="w-3.5 h-3.5" />Export CSV</button>
       </div>
     </div>
@@ -242,7 +254,7 @@ function Overview({ analytics, users, days, userId, onDaysChange, onUserChange }
       <div className="flex items-start justify-between"><div><h2 className="text-sm font-semibold">Activity trend</h2><p className="text-xs text-zinc-600 mt-1">Connected time and participating members by day</p></div><span className="text-xs text-amber-400 font-semibold">{formatDuration(analytics.summary.tracked_seconds)} total</span></div>
       <div className="h-56 flex items-end gap-1 md:gap-2 mt-7 border-b border-zinc-800">{analytics.daily.map((item, index) => {
         const height = Number(item.active_seconds) ? Math.max(3, Number(item.active_seconds) / maxDaily * 100) : 1;
-        const showLabel = days === 7 || index === 0 || index === analytics.daily.length - 1 || index % (days === 30 ? 5 : 15) === 0;
+        const showLabel = analytics.range.days <= 7 || index === 0 || index === analytics.daily.length - 1 || index % (analytics.range.days <= 31 ? 5 : 15) === 0;
         return <div key={item.day} title={`${new Date(`${item.day}T00:00:00Z`).toLocaleDateString()}: ${formatDuration(item.active_seconds)} · ${item.active_users} members`} className="group flex-1 h-full flex flex-col justify-end items-center relative"><div className="opacity-0 group-hover:opacity-100 pointer-events-none absolute bottom-full mb-2 z-10 whitespace-nowrap bg-black border border-zinc-700 rounded-lg px-2 py-1 text-[10px]">{formatDuration(item.active_seconds)} · {item.active_users} members</div><div className="w-full max-w-8 bg-gradient-to-t from-amber-700 via-amber-500 to-yellow-300 rounded-t-sm transition-all group-hover:brightness-125" style={{ height: `${height}%` }} />{showLabel && <span className="absolute top-full mt-2 text-[9px] text-zinc-600 whitespace-nowrap">{new Date(`${item.day}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}</div>;
       })}</div><div className="h-5" />
     </div>
@@ -274,7 +286,7 @@ function UserEditor({ form, setForm, selected, busy, currentUser, floors, onSave
     <label className="block"><span className="text-xs text-zinc-400">Gender and default picture</span><select aria-label="Gender" value={form.gender} onChange={(event) => setForm({ ...form, gender: event.target.value })} className="mt-1.5 w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm outline-none focus:border-amber-500"><option value="male">Man</option><option value="female">Woman</option></select></label>
     <label className="block"><span className="text-xs text-zinc-400">Main floor</span><select aria-label="Main floor" value={form.defaultFloorId} onChange={(event) => setForm({ ...form, defaultFloorId: event.target.value })} className="mt-1.5 w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-amber-500">{floors.map((floor: Floor) => <option key={floor.id} value={floor.id}>{floor.name}</option>)}</select><span className="block text-[10px] text-zinc-600 mt-1.5">Their personal office moves with this assignment.</span></label>
     <Field label={selected ? 'Reset password (optional)' : 'Temporary password'} value={form.password} type="password" placeholder={selected ? 'Leave blank to keep current' : 'At least 10 characters'} onChange={(value: string) => setForm({ ...form, password: value })} />
-    {selected && <div className="grid grid-cols-2 gap-3"><Toggle label="Account enabled" value={form.isActive} disabled={owner || selected.id === currentUser.id} onChange={(value: boolean) => setForm({ ...form, isActive: value })} /><Toggle label="Administrator" value={form.isAdmin} disabled={owner || currentUser.username !== 'admin'} onChange={(value: boolean) => setForm({ ...form, isAdmin: value })} /></div>}
+    {selected && <div className="grid grid-cols-2 gap-3"><Toggle label="Account enabled" value={form.isActive} disabled={owner || selected.id === currentUser.id} onChange={(value: boolean) => setForm({ ...form, isActive: value })} /><Toggle label="Administrator" value={form.isAdmin} disabled={owner || currentUser.username !== 'admin'} onChange={(value: boolean) => setForm({ ...form, isAdmin: value })} /><Toggle label="Analytics overview" value={form.canViewAnalytics} disabled={owner || currentUser.username !== 'admin'} onChange={(value: boolean) => setForm({ ...form, canViewAnalytics: value })} /></div>}
     <button disabled={busy} onClick={onSave} className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black py-2.5 rounded-xl text-sm font-bold"><Save className="w-4 h-4" />{selected ? 'Save changes' : 'Create account'}</button>
     {selected && !owner && selected.id !== currentUser.id && <button disabled={busy} onClick={onDelete} className="w-full flex items-center justify-center gap-2 border border-red-500/30 text-red-400 hover:bg-red-500/10 py-2.5 rounded-xl text-sm"><Trash2 className="w-4 h-4" />Delete account</button>}
   </div></div>;

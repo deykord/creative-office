@@ -19,6 +19,7 @@ import {
   Maximize2,
   Minimize2,
   Minus,
+  Volume2,
 } from 'lucide-react';
 
 interface ExpandedRoomModalProps {
@@ -40,10 +41,13 @@ interface ExpandedRoomModalProps {
   onHandRaised: (raised: boolean) => void;
   audioDevices: MediaDeviceInfo[];
   videoDevices: MediaDeviceInfo[];
+  outputDevices: MediaDeviceInfo[];
   selectedAudioDeviceId: string;
   selectedVideoDeviceId: string;
+  selectedOutputDeviceId: string;
   onSelectAudioDevice: (id: string) => void;
   onSelectVideoDevice: (id: string) => void;
+  onSelectOutputDevice: (id: string) => void;
 }
 
 export const EMOJI_PRESETS_EXTENDED = [
@@ -110,10 +114,13 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
   onHandRaised,
   audioDevices,
   videoDevices,
+  outputDevices,
   selectedAudioDeviceId,
   selectedVideoDeviceId,
+  selectedOutputDeviceId,
   onSelectAudioDevice,
   onSelectVideoDevice,
+  onSelectOutputDevice,
 }) => {
   const [selectedView, setSelectedView] = useState<'gallery' | 'speaker'>('gallery');
   const [minimized, setMinimized] = useState(false);
@@ -185,7 +192,7 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
   const presenterStream = presenter ? (presenter.id === currentUser.id ? localMediaStream : remoteStreams[presenter.id]) : null;
 
   if (minimized) return <section role="dialog" aria-label={room.name} data-room-window="minimized" className="fixed left-18 bottom-20 z-50 w-[min(360px,calc(100vw-5.5rem))] h-13 rounded-2xl border border-white/[.11] bg-[#15161b]/98 shadow-[0_24px_70px_rgba(0,0,0,.65)] backdrop-blur-xl flex items-center px-3">
-    {room.type !== 'game' && <div className="sr-only" aria-label="Minimized room participant audio">{Object.entries(remoteStreams).map(([peerId, stream]) => <StreamAudio key={peerId} peerId={peerId} stream={stream} />)}</div>}
+    {room.type !== 'game' && <div className="sr-only" aria-label="Minimized room participant audio">{Object.entries(remoteStreams).map(([peerId, stream]) => <StreamAudio key={peerId} peerId={peerId} stream={stream} outputDeviceId={selectedOutputDeviceId} />)}</div>}
     <span className="w-8 h-8 rounded-xl border border-indigo-300/15 bg-indigo-300/[.07] text-indigo-300 flex items-center justify-center"><Video className="w-4 h-4" /></span><button type="button" onClick={() => setMinimized(false)} className="min-w-0 flex-1 h-full px-3 text-left"><span className="block text-xs font-semibold truncate">{room.name}</span><span className="block text-[8px] uppercase tracking-[.15em] text-emerald-400">Live · {displayParticipants.length} inside</span></button><button type="button" title="Leave room" onClick={onClose} className="p-2 text-zinc-600 hover:text-red-300"><X className="w-4 h-4" /></button>
   </section>;
 
@@ -229,7 +236,7 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
 
       {room.type !== 'game' && (
         <div className="sr-only" aria-label="Room participant audio">
-          {Object.entries(remoteStreams).map(([peerId, stream]) => <StreamAudio key={peerId} peerId={peerId} stream={stream} />)}
+          {Object.entries(remoteStreams).map(([peerId, stream]) => <StreamAudio key={peerId} peerId={peerId} stream={stream} outputDeviceId={selectedOutputDeviceId} />)}
         </div>
       )}
 
@@ -431,6 +438,8 @@ export const ExpandedRoomModal: React.FC<ExpandedRoomModalProps> = ({
             {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
           </button>{room.type === 'meeting' && <label className="relative flex w-7 items-center justify-center border-l border-[#3A3A40] bg-[#242427]" title="Choose microphone"><ChevronDown className="h-3 w-3 text-zinc-400"/><select aria-label="Choose microphone during meeting" value={selectedAudioDeviceId} onChange={(event) => onSelectAudioDevice(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0">{audioDevices.length ? audioDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>) : <option value="">Default microphone</option>}</select></label>}</div>
 
+          <label className="relative flex h-11 w-12 shrink-0 items-center justify-center rounded-xl border border-[#3A3A40] bg-[#242427]" title="Choose speaker"><Volume2 className="h-5 w-5 text-zinc-200"/><ChevronDown className="ml-0.5 h-3 w-3 text-zinc-500"/><select aria-label="Choose speaker during call" value={selectedOutputDeviceId} onChange={(event) => onSelectOutputDevice(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0">{outputDevices.length ? outputDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Speaker ${index + 1}`}</option>) : <option value="">System default speaker</option>}</select></label>
+
           {/* Screen Share */}
           <button
             onClick={() => onUpdateStatus({ isSharingScreen: !currentPresence?.isSharingScreen })}
@@ -491,13 +500,15 @@ const StreamVideo: React.FC<{ stream: MediaStream; muted: boolean; contain?: boo
   />
 );
 
-const StreamAudio: React.FC<{ peerId: string; stream: MediaStream }> = ({ peerId, stream }) => {
+const StreamAudio: React.FC<{ peerId: string; stream: MediaStream; outputDeviceId: string }> = ({ peerId, stream, outputDeviceId }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.srcObject = stream;
+    const sinkAudio = audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+    if (sinkAudio.setSinkId) void sinkAudio.setSinkId(outputDeviceId).catch(() => undefined);
     const retryPlayback = () => void audio.play().catch(() => undefined);
     void audio.play().catch(() => document.addEventListener('pointerdown', retryPlayback, { once: true }));
     return () => {
@@ -505,7 +516,7 @@ const StreamAudio: React.FC<{ peerId: string; stream: MediaStream }> = ({ peerId
       audio.pause();
       audio.srcObject = null;
     };
-  }, [stream]);
+  }, [outputDeviceId, stream]);
 
   return <audio ref={audioRef} data-presentation-audio={peerId} autoPlay playsInline />;
 };

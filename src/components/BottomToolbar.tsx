@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PresenceStatus } from '../types';
-import { BriefcaseBusiness, CalendarDays, Camera, CameraOff, ChevronDown, CircleDotDashed, CirclePlay, LayoutDashboard, LibraryBig, Mic, MicOff, Monitor, PictureInPicture2, RadioTower, Smile, Sparkles, Video } from 'lucide-react';
+import { BriefcaseBusiness, CalendarDays, Camera, CameraOff, ChevronDown, CircleDotDashed, CirclePlay, LayoutDashboard, LibraryBig, Mic, MicOff, Monitor, PictureInPicture2, RadioTower, Smile, Sparkles, Video, Volume2 } from 'lucide-react';
 
 interface BottomToolbarProps {
   currentPresence?: PresenceStatus;
@@ -16,13 +16,17 @@ interface BottomToolbarProps {
   storiesOpen?: boolean;
   audioDevices: MediaDeviceInfo[];
   videoDevices: MediaDeviceInfo[];
+  outputDevices: MediaDeviceInfo[];
   selectedAudioDeviceId: string;
   selectedVideoDeviceId: string;
+  selectedOutputDeviceId: string;
   onSelectAudioDevice: (id: string) => void;
   onSelectVideoDevice: (id: string) => void;
+  onSelectOutputDevice: (id: string) => void;
   isOwner?: boolean;
   ownerDashboardOpen?: boolean;
   onOpenOwnerDashboard?: () => void;
+  dashboardLabel?: string;
   onRequestPictureInPicture?: () => void;
 }
 
@@ -40,13 +44,17 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
   storiesOpen = false,
   audioDevices,
   videoDevices,
+  outputDevices,
   selectedAudioDeviceId,
   selectedVideoDeviceId,
+  selectedOutputDeviceId,
   onSelectAudioDevice,
   onSelectVideoDevice,
+  onSelectOutputDevice,
   isOwner = false,
   ownerDashboardOpen = false,
   onOpenOwnerDashboard,
+  dashboardLabel = 'Owner dashboard',
   onRequestPictureInPicture,
 }) => {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
@@ -96,6 +104,17 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
             <ChevronDown className="h-2.5 w-2.5 opacity-70" />
             <select aria-label="Choose microphone" value={selectedAudioDeviceId} onChange={(event) => onSelectAudioDevice(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0">
               {audioDevices.length ? audioDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>) : <option value="">Default microphone</option>}
+            </select>
+          </label>
+        </div>
+
+        {/* Speaker/output selector */}
+        <div className="flex h-8 overflow-hidden rounded-xl border border-[#2D2D30] bg-[#1A1A1C] text-[#E0E0E0] sm:h-9">
+          <span className="flex w-7 items-center justify-center sm:w-8" title="Speaker output"><Volume2 className="h-4 w-4" /></span>
+          <label className="relative flex w-4 cursor-pointer items-center justify-center border-l border-current/15 transition hover:bg-white/[.06] sm:w-5" title="Choose speaker">
+            <ChevronDown className="h-2.5 w-2.5 opacity-70" />
+            <select aria-label="Choose speaker" value={selectedOutputDeviceId} onChange={(event) => onSelectOutputDevice(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0">
+              {outputDevices.length ? outputDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Speaker ${index + 1}`}</option>) : <option value="">System default speaker</option>}
             </select>
           </label>
         </div>
@@ -171,7 +190,7 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
       <div className="absolute right-2 top-7 flex -translate-y-1/2 items-center gap-0.5 rounded-[16px] border border-white/[.09] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.42)] sm:right-3 sm:top-1/2 sm:rounded-[18px] sm:p-1">
         {utilityNotice && <span role="status" className="absolute bottom-12 right-0 whitespace-nowrap rounded-xl border border-white/[.09] bg-[#17181d]/98 px-3 py-2 text-[10px] text-zinc-300 shadow-xl">{utilityNotice}</span>}
         <button type="button" onClick={onRequestPictureInPicture} aria-label="Open mini office" title="Open mini office" className="flex h-8 w-8 items-center justify-center rounded-xl text-cyan-300/80 transition hover:bg-cyan-300/[.08] hover:text-cyan-200 md:hidden"><PictureInPicture2 className="h-4 w-4" /></button>
-        {isOwner && <button type="button" onClick={onOpenOwnerDashboard} aria-label="Owner dashboard" title="Owner dashboard" className={`flex h-8 w-8 items-center justify-center rounded-xl transition ${ownerDashboardOpen ? 'bg-amber-300/10 text-amber-300' : 'text-amber-300/75 hover:bg-amber-300/[.08] hover:text-amber-200'}`}><LayoutDashboard className="h-4 w-4" /></button>}
+        {isOwner && <button type="button" onClick={onOpenOwnerDashboard} aria-label={dashboardLabel} title={dashboardLabel} className={`flex h-8 w-8 items-center justify-center rounded-xl transition ${ownerDashboardOpen ? 'bg-amber-300/10 text-amber-300' : 'text-amber-300/75 hover:bg-amber-300/[.08] hover:text-amber-200'}`}><LayoutDashboard className="h-4 w-4" /></button>}
         {futureTools.map(({ label, icon: Icon }, index) => <button key={label} type="button" onClick={() => showUtilityNotice(label)} aria-label={label} title={`${label} · coming soon`} className={`h-8 w-8 items-center justify-center rounded-xl text-zinc-500 transition hover:bg-white/[.06] hover:text-zinc-200 ${index < 2 ? 'hidden md:flex' : 'hidden lg:flex'}`}><Icon className="h-4 w-4" /></button>)}
         <button
           id="btn-toggle-shelf"

@@ -12,6 +12,7 @@ export interface User {
   teamId: string;
   teamName?: string;
   isAdmin?: boolean;
+  canViewAnalytics?: boolean;
   isActive?: boolean;
   officeIntroSeen?: boolean;
   personalRoomId?: string;

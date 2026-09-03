@@ -57,6 +57,7 @@ function safeUser(user: User): User {
     teamId: user.teamId,
     teamName: user.teamName,
     isAdmin: user.isAdmin,
+    canViewAnalytics: user.canViewAnalytics,
     isActive: user.isActive,
     createdAt: user.createdAt,
     officeIntroSeen: user.officeIntroSeen,
@@ -107,6 +108,14 @@ async function authenticate(req: AuthRequest, res: Response, next: NextFunction)
 function requireAdmin(req: AuthRequest, res: Response, next: NextFunction): void {
   if (!req.user?.isAdmin) {
     res.status(403).json({ error: 'Administrator access required' });
+    return;
+  }
+  next();
+}
+
+function requireAnalyticsAccess(req: AuthRequest, res: Response, next: NextFunction): void {
+  if (!req.user?.isAdmin && !req.user?.canViewAnalytics) {
+    res.status(403).json({ error: 'Analytics access required' });
     return;
   }
   next();
@@ -308,6 +317,7 @@ async function startServer() {
     const role = req.body?.role === undefined ? undefined : String(req.body.role).trim();
     const password = req.body?.password ? String(req.body.password) : undefined;
     const isAdmin = typeof req.body?.isAdmin === 'boolean' ? req.body.isAdmin : undefined;
+    const canViewAnalytics = typeof req.body?.canViewAnalytics === 'boolean' ? req.body.canViewAnalytics : undefined;
     const isActive = typeof req.body?.isActive === 'boolean' ? req.body.isActive : undefined;
     const defaultFloorId = req.body?.defaultFloorId === undefined ? undefined : String(req.body.defaultFloorId);
     const gender = req.body?.gender === undefined ? undefined : String(req.body.gender) as 'male' | 'female';
@@ -323,6 +333,10 @@ async function startServer() {
     }
     if (isAdmin !== undefined && !requesterIsOwner) {
       res.status(403).json({ error: 'Only the owner can change administrator access.' });
+      return;
+    }
+    if (canViewAnalytics !== undefined && !requesterIsOwner) {
+      res.status(403).json({ error: 'Only the owner can change analytics access.' });
       return;
     }
     if (target.id === req.user!.id && isActive === false) {
@@ -348,7 +362,7 @@ async function startServer() {
     if (gender !== undefined && !['male', 'female'].includes(gender)) { res.status(400).json({ error: 'Select a valid gender.' }); return; }
     try {
       const user = await db.adminUpdateUser(target.id, {
-        name, username, role, gender, isAdmin, isActive,
+        name, username, role, gender, isAdmin, canViewAnalytics, isActive,
         passwordHash: password ? await hashPassword(password) : undefined, defaultFloorId,
       });
       io.emit('users:updated', await db.getUsers());
@@ -380,11 +394,24 @@ async function startServer() {
     res.status(204).end();
   }));
 
-  app.get('/api/admin/analytics', requireAdmin, asyncRoute(async (req, res) => {
+  app.get('/api/admin/analytics', requireAnalyticsAccess, asyncRoute(async (req, res) => {
+    const preset = typeof req.query.range === 'string' ? req.query.range : 'week';
+    const presetDays = preset === 'day' ? 1 : preset === 'month' ? 30 : 7;
     const requestedDays = Number(req.query.days);
-    const days = [7, 30, 90].includes(requestedDays) ? requestedDays : 7;
+    const days = [1, 7, 30, 90].includes(requestedDays) ? requestedDays : presetDays;
     const userId = typeof req.query.userId === 'string' && req.query.userId.trim() ? req.query.userId.trim() : undefined;
-    res.json(await db.getAdminAnalytics(days, userId));
+    const customFrom = preset === 'custom' && typeof req.query.from === 'string' ? req.query.from : undefined;
+    const customTo = preset === 'custom' && typeof req.query.to === 'string' ? req.query.to : undefined;
+    if (preset === 'custom' && (!customFrom || !customTo || !/^\d{4}-\d{2}-\d{2}$/.test(customFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(customTo))) {
+      res.status(400).json({ error: 'Choose a valid custom date range.' });
+      return;
+    }
+    try {
+      res.json(await db.getAdminAnalytics(days, userId, customFrom, customTo));
+    } catch (error) {
+      if (error instanceof RangeError) { res.status(400).json({ error: error.message }); return; }
+      throw error;
+    }
   }));
 
   app.post('/api/admin/rooms', requireAdmin, asyncRoute(async (req, res) => {

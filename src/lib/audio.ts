@@ -8,11 +8,20 @@ function getAudioContext(): AudioContext {
   if (!audioCtx) {
     const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     audioCtx = new AudioContextClass();
+    const savedOutput = window.localStorage.getItem('creative-office-audio-output') || '';
+    const sinkContext = audioCtx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    if (sinkContext.setSinkId) void sinkContext.setSinkId(savedOutput).catch(() => undefined);
   }
   if (audioCtx.state === 'suspended') {
     audioCtx.resume();
   }
   return audioCtx;
+}
+
+export async function setNotificationAudioOutput(deviceId: string) {
+  if (!audioCtx) return;
+  const sinkContext = audioCtx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+  if (sinkContext.setSinkId) await sinkContext.setSinkId(deviceId);
 }
 
 export function setSoundMuted(muted: boolean) {

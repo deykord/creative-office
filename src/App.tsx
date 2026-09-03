@@ -8,7 +8,7 @@ import { ExpandedRoomModal } from './components/ExpandedRoomModal';
 import { ProfileModal } from './components/ProfileModal';
 import { LoginPage } from './components/LoginPage';
 import { UserManagementModal } from './components/UserManagementModal';
-import { startKnockRinging, stopKnockRinging } from './lib/audio';
+import { setNotificationAudioOutput, startKnockRinging, stopKnockRinging } from './lib/audio';
 import { useVoiceActivity } from './hooks/useVoiceActivity';
 import { OfficeWelcomeModal } from './components/OfficeWelcomeModal';
 import { OfficeFloor } from './components/OfficeFloor';
@@ -66,8 +66,10 @@ export default function App() {
   const [preJoinCameraOn, setPreJoinCameraOn] = useState(false);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState(() => window.localStorage.getItem('creative-office-audio-input') || '');
   const [selectedVideoDeviceId, setSelectedVideoDeviceId] = useState(() => window.localStorage.getItem('creative-office-video-input') || '');
+  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState(() => window.localStorage.getItem('creative-office-audio-output') || '');
   const [chatWindowOpen, setChatWindowOpen] = useState(false);
   const [calendarWindowOpen, setCalendarWindowOpen] = useState(false);
   const [storiesWindowOpen, setStoriesWindowOpen] = useState(false);
@@ -92,14 +94,18 @@ export default function App() {
         if (cancelled) return;
         const microphones = devices.filter((device) => device.kind === 'audioinput');
         const cameras = devices.filter((device) => device.kind === 'videoinput');
+        const speakers = devices.filter((device) => device.kind === 'audiooutput');
         setAudioDevices(microphones);
         setVideoDevices(cameras);
+        setOutputDevices(speakers);
         setSelectedAudioDeviceId((current) => microphones.some((device) => device.deviceId === current) ? current : microphones[0]?.deviceId || '');
         setSelectedVideoDeviceId((current) => cameras.some((device) => device.deviceId === current) ? current : cameras[0]?.deviceId || '');
+        setSelectedOutputDeviceId((current) => speakers.some((device) => device.deviceId === current) ? current : speakers[0]?.deviceId || '');
       } catch {
         if (!cancelled) {
           setAudioDevices([]);
           setVideoDevices([]);
+          setOutputDevices([]);
         }
       }
     };
@@ -118,6 +124,11 @@ export default function App() {
       if (!allowedUsers.has(peerId)) webrtcManagerRef.current?.removePeer(peerId);
     });
   }, [activeMediaRoom?.id, remoteStreams, roomOccupancyMap]);
+
+  useEffect(() => {
+    window.localStorage.setItem('creative-office-audio-output', selectedOutputDeviceId);
+    void setNotificationAudioOutput(selectedOutputDeviceId).catch(() => undefined);
+  }, [selectedOutputDeviceId]);
 
   useEffect(() => {
     fetch('/api/auth/session')
@@ -362,10 +373,13 @@ export default function App() {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const microphones = devices.filter((device) => device.kind === 'audioinput');
     const cameras = devices.filter((device) => device.kind === 'videoinput');
+    const speakers = devices.filter((device) => device.kind === 'audiooutput');
     setAudioDevices(microphones);
     setVideoDevices(cameras);
+    setOutputDevices(speakers);
     setSelectedAudioDeviceId((current) => microphones.some((device) => device.deviceId === current) ? current : microphones[0]?.deviceId || '');
     setSelectedVideoDeviceId((current) => cameras.some((device) => device.deviceId === current) ? current : cameras[0]?.deviceId || '');
+    setSelectedOutputDeviceId((current) => speakers.some((device) => device.deviceId === current) ? current : speakers[0]?.deviceId || '');
   };
   const updateStatus = (updates: Partial<PresenceStatus>) => {
     const manager = webrtcManagerRef.current;
@@ -550,6 +564,20 @@ export default function App() {
     } catch (error) { setMediaError(error instanceof Error ? error.message : 'The selected device is unavailable.'); }
   };
 
+  const selectOutputDevice = async (deviceId: string) => {
+    try {
+      const probe = document.createElement('audio') as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+      if (probe.setSinkId) await probe.setSinkId(deviceId);
+      else if (deviceId && deviceId !== 'default') throw new Error('Speaker selection is not supported by this browser.');
+      setSelectedOutputDeviceId(deviceId);
+      window.localStorage.setItem('creative-office-audio-output', deviceId);
+      await setNotificationAudioOutput(deviceId);
+      setMediaError('');
+    } catch (error) {
+      setMediaError(error instanceof Error ? error.message : 'The selected speaker is unavailable.');
+    }
+  };
+
   const confirmMeetingJoin = async () => {
     if (!pendingMeetingRoom || meetingConsentBusy) return;
     setMeetingConsentBusy(true);
@@ -728,20 +756,20 @@ export default function App() {
         </aside>
       </div>
 
-      <BottomToolbar currentPresence={currentPresence} onUpdateStatus={updateStatus} onSendGlobalReaction={(emoji) => sendReaction(emoji)} onOpenShelf={() => setShelfWindowOpen((value) => !value)} shelfOpen={shelfWindowOpen} shelfLabel={`Open ${(activeMediaRoom?.type === 'personal' ? users.find((user) => user.id === activeMediaRoom.ownerUserId)?.name : currentUser.name) || currentUser.name}'s shelf`} canShareScreen={Boolean(activeMediaRoom)} onOpenCalendar={() => setCalendarWindowOpen((value) => !value)} onOpenStories={() => setStoriesWindowOpen((value) => !value)} calendarOpen={calendarWindowOpen} storiesOpen={storiesWindowOpen} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectActiveDevice('audio', id)} onSelectVideoDevice={(id) => void selectActiveDevice('video', id)} isOwner={currentUser.isAdmin} ownerDashboardOpen={isUserManagementOpen} onOpenOwnerDashboard={() => setIsUserManagementOpen(true)} onRequestPictureInPicture={() => window.dispatchEvent(new Event('office:request-picture-in-picture'))} />
+      <BottomToolbar currentPresence={currentPresence} onUpdateStatus={updateStatus} onSendGlobalReaction={(emoji) => sendReaction(emoji)} onOpenShelf={() => setShelfWindowOpen((value) => !value)} shelfOpen={shelfWindowOpen} shelfLabel={`Open ${(activeMediaRoom?.type === 'personal' ? users.find((user) => user.id === activeMediaRoom.ownerUserId)?.name : currentUser.name) || currentUser.name}'s shelf`} canShareScreen={Boolean(activeMediaRoom)} onOpenCalendar={() => setCalendarWindowOpen((value) => !value)} onOpenStories={() => setStoriesWindowOpen((value) => !value)} calendarOpen={calendarWindowOpen} storiesOpen={storiesWindowOpen} audioDevices={audioDevices} videoDevices={videoDevices} outputDevices={outputDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} selectedOutputDeviceId={selectedOutputDeviceId} onSelectAudioDevice={(id) => void selectActiveDevice('audio', id)} onSelectVideoDevice={(id) => void selectActiveDevice('video', id)} onSelectOutputDevice={(id) => void selectOutputDevice(id)} isOwner={Boolean(currentUser.isAdmin || currentUser.canViewAnalytics)} ownerDashboardOpen={isUserManagementOpen} onOpenOwnerDashboard={() => setIsUserManagementOpen(true)} dashboardLabel={currentUser.isAdmin ? 'Owner dashboard' : 'Analytics dashboard'} onRequestPictureInPicture={() => window.dispatchEvent(new Event('office:request-picture-in-picture'))} />
       {!!personalMediaParticipants.length && <PersonalOfficePresentation participants={personalMediaParticipants} onStopCamera={() => updateStatus({ isCameraOn: false })} onStopScreenShare={() => updateStatus({ isSharingScreen: false })} />}
       <OfficePictureInPicture enabled={Boolean(activeMediaRoom?.type === 'personal' && !personalMediaParticipants.length)} profile={currentUser} muted={Boolean(currentPresence?.isMuted)} speaking={Boolean(speakingUsers[currentUser.id])} localStream={localMediaStream} />
       {activeMediaRoom?.type === 'personal' && (
         <div className="sr-only" aria-label="Personal office audio connections">
-          {Object.entries(remoteStreams).map(([peerId, stream]) => <RemoteOfficeAudio key={peerId} peerId={peerId} stream={stream} />)}
+          {Object.entries(remoteStreams).map(([peerId, stream]) => <RemoteOfficeAudio key={peerId} peerId={peerId} stream={stream} outputDeviceId={selectedOutputDeviceId} />)}
         </div>
       )}
-      <ExpandedRoomModal isOpen={!!expandedRoom} onClose={leaveRoom} room={expandedRoom} users={users} presences={presences} currentUser={currentUser} currentPresence={currentPresence} activeReactions={activeReactions} onSendReaction={(emoji) => sendReaction(emoji, expandedRoom?.id)} onUpdateStatus={updateStatus} localMediaStream={localMediaStream} remoteStreams={remoteStreams} mediaError={mediaError} raisedHands={raisedHands} speakingUsers={speakingUsers} onHandRaised={(raised) => { setRaisedHands((previous) => ({ ...previous, [currentUser.id]: raised })); setHandRaisedSocket(raised); }} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectActiveDevice('audio', id)} onSelectVideoDevice={(id) => void selectActiveDevice('video', id)} />
+      <ExpandedRoomModal isOpen={!!expandedRoom} onClose={leaveRoom} room={expandedRoom} users={users} presences={presences} currentUser={currentUser} currentPresence={currentPresence} activeReactions={activeReactions} onSendReaction={(emoji) => sendReaction(emoji, expandedRoom?.id)} onUpdateStatus={updateStatus} localMediaStream={localMediaStream} remoteStreams={remoteStreams} mediaError={mediaError} raisedHands={raisedHands} speakingUsers={speakingUsers} onHandRaised={(raised) => { setRaisedHands((previous) => ({ ...previous, [currentUser.id]: raised })); setHandRaisedSocket(raised); }} audioDevices={audioDevices} videoDevices={videoDevices} outputDevices={outputDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} selectedOutputDeviceId={selectedOutputDeviceId} onSelectAudioDevice={(id) => void selectActiveDevice('audio', id)} onSelectVideoDevice={(id) => void selectActiveDevice('video', id)} onSelectOutputDevice={(id) => void selectOutputDevice(id)} />
       <KnockModal knock={incomingKnock} outgoingTargetUser={outgoingKnockUser} onAccept={() => { const personalOffice = rooms.find((room) => room.ownerUserId === currentUser.id); if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, true); if (personalOffice) joinRoom(personalOffice.id); setIncomingKnock(null); }} onDecline={() => { if (incomingKnock) respondKnockSocket(incomingKnock.fromUserId, false); setIncomingKnock(null); }} onCancelOutgoing={() => { if (outgoingKnockUser) cancelKnockSocket(outgoingKnockUser.id); setOutgoingKnockUser(null); }} />
       <ProfileModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} currentUser={currentUser} onSave={saveProfile} onLogout={logout} />
-      {currentUser.isAdmin && <UserManagementModal isOpen={isUserManagementOpen} onClose={() => setIsUserManagementOpen(false)} users={users} rooms={rooms} floors={floors} currentUser={currentUser} onUsersChanged={setUsers} onRoomsChanged={setRooms} onFloorsChanged={setFloors} />}
+      {(currentUser.isAdmin || currentUser.canViewAnalytics) && <UserManagementModal isOpen={isUserManagementOpen} onClose={() => setIsUserManagementOpen(false)} users={users} rooms={rooms} floors={floors} currentUser={currentUser} onUsersChanged={setUsers} onRoomsChanged={setRooms} onFloorsChanged={setFloors} />}
       {!currentUser.officeIntroSeen && <OfficeWelcomeModal user={currentUser} busy={introBusy} error={introError} onContinue={acknowledgeOfficeIntro} />}
-      <MeetingPreJoinModal room={pendingMeetingRoom} busy={meetingConsentBusy} error={meetingConsentError} previewStream={preJoinStream} micOn={preJoinMicOn} cameraOn={preJoinCameraOn} onToggleMic={() => void togglePreJoinDevice('audio')} onToggleCamera={() => void togglePreJoinDevice('video')} audioDevices={audioDevices} videoDevices={videoDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} onSelectAudioDevice={(id) => void selectPreJoinDevice('audio', id)} onSelectVideoDevice={(id) => void selectPreJoinDevice('video', id)} onCancel={() => { preJoinStream?.getTracks().forEach((track) => track.stop()); setPreJoinStream(null); setPendingMeetingRoom(null); setMeetingConsentError(''); }} onConfirm={confirmMeetingJoin} />
+      <MeetingPreJoinModal room={pendingMeetingRoom} busy={meetingConsentBusy} error={meetingConsentError} previewStream={preJoinStream} micOn={preJoinMicOn} cameraOn={preJoinCameraOn} onToggleMic={() => void togglePreJoinDevice('audio')} onToggleCamera={() => void togglePreJoinDevice('video')} audioDevices={audioDevices} videoDevices={videoDevices} outputDevices={outputDevices} selectedAudioDeviceId={selectedAudioDeviceId} selectedVideoDeviceId={selectedVideoDeviceId} selectedOutputDeviceId={selectedOutputDeviceId} onSelectAudioDevice={(id) => void selectPreJoinDevice('audio', id)} onSelectVideoDevice={(id) => void selectPreJoinDevice('video', id)} onSelectOutputDevice={(id) => void selectOutputDevice(id)} onCancel={() => { preJoinStream?.getTracks().forEach((track) => track.stop()); setPreJoinStream(null); setPendingMeetingRoom(null); setMeetingConsentError(''); }} onConfirm={confirmMeetingJoin} />
       {userMenu && <UserActionMenu target={userMenu.user} currentUser={currentUser} presence={presences[userMenu.user.id]} rooms={rooms} x={userMenu.x} y={userMenu.y} onClose={() => setUserMenu(null)} onChat={() => void openDirectMessage(userMenu.user.id)} onCall={() => { const targetId = userMenu.user.id; setUserMenu(null); knockOnUser(targetId); }} onInvite={() => { sendRoomInviteSocket(userMenu.user.id); setUserMenu(null); }} onKick={() => { if (window.confirm(`Remove ${userMenu.user.name} from this room?`)) kickUserFromRoomSocket(userMenu.user.id); setUserMenu(null); }} />}
       <RoomInviteModal invite={incomingRoomInvite} onDecline={() => setIncomingRoomInvite(null)} onAccept={() => { const invite = incomingRoomInvite; setIncomingRoomInvite(null); if (invite) requestRoomJoin(invite.roomId); }} />
       <ChatWindow currentUser={currentUser} users={users} open={chatWindowOpen} selectedConversationId={selectedConversationId} onOpen={() => setChatWindowOpen(true)} onClose={() => setChatWindowOpen(false)} onSelectConversation={setSelectedConversationId} />
@@ -753,13 +781,15 @@ export default function App() {
   );
 }
 
-const RemoteOfficeAudio: React.FC<{ peerId: string; stream: MediaStream }> = ({ peerId, stream }) => {
+const RemoteOfficeAudio: React.FC<{ peerId: string; stream: MediaStream; outputDeviceId: string }> = ({ peerId, stream, outputDeviceId }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.srcObject = stream;
+    const sinkAudio = audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+    if (sinkAudio.setSinkId) void sinkAudio.setSinkId(outputDeviceId).catch(() => undefined);
     const play = () => void audio.play().catch(() => undefined);
     void audio.play().catch(() => document.addEventListener('pointerdown', play, { once: true }));
     return () => {
@@ -767,7 +797,7 @@ const RemoteOfficeAudio: React.FC<{ peerId: string; stream: MediaStream }> = ({ 
       audio.pause();
       audio.srcObject = null;
     };
-  }, [stream]);
+  }, [outputDeviceId, stream]);
 
   return <audio ref={audioRef} data-remote-office-audio={peerId} autoPlay playsInline />;
 };

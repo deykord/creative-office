@@ -26,6 +26,7 @@ function mapUser(row: Record<string, unknown>): User {
     teamId: row.team_id ? String(row.team_id) : '',
     teamName: row.team_name ? String(row.team_name) : undefined,
     isAdmin: Boolean(row.is_admin),
+    canViewAnalytics: Boolean(row.can_view_analytics),
     isActive: row.is_active === undefined ? true : Boolean(row.is_active),
     createdAt: row.created_at ? new Date(String(row.created_at)).toISOString() : undefined,
     officeIntroSeen: Boolean(row.office_intro_seen),
@@ -85,6 +86,7 @@ class OfficeDatabase {
     const ddl = this.getSqlDDL();
     await pool.query(ddl);
     await pool.query('ALTER TABLE presence_status DROP COLUMN IF EXISTS current_music, DROP COLUMN IF EXISTS custom_status');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_analytics BOOLEAN NOT NULL DEFAULT false');
     const { rows: floorRows } = await pool.query('SELECT id FROM floors ORDER BY sort_order, created_at LIMIT 1');
     const mainFloorId = floorRows[0].id;
     await pool.query('UPDATE users SET default_floor_id=$1 WHERE default_floor_id IS NULL', [mainFloorId]);
@@ -192,6 +194,7 @@ class OfficeDatabase {
     role?: string;
     gender?: 'male' | 'female';
     isAdmin?: boolean;
+    canViewAnalytics?: boolean;
     isActive?: boolean;
     passwordHash?: string;
     defaultFloorId?: string;
@@ -205,10 +208,11 @@ class OfficeDatabase {
         is_active = COALESCE($6, is_active),
         password_hash = COALESCE($7, password_hash),
         default_floor_id = COALESCE($8, default_floor_id),
-        gender = COALESCE($9, gender)
+        gender = COALESCE($9, gender),
+        can_view_analytics = COALESCE($10, can_view_analytics)
        WHERE id = $1 RETURNING *`,
       [id, updates.name || null, updates.username || null, updates.role || null,
-        updates.isAdmin ?? null, updates.isActive ?? null, updates.passwordHash || null, updates.defaultFloorId || null, updates.gender || null],
+        updates.isAdmin ?? null, updates.isActive ?? null, updates.passwordHash || null, updates.defaultFloorId || null, updates.gender || null, updates.canViewAnalytics ?? null],
     );
     if (updates.defaultFloorId) await pool.query('UPDATE rooms SET floor_id=$2 WHERE owner_user_id=$1', [id, updates.defaultFloorId]);
     if (updates.isActive === false) await pool.query('DELETE FROM auth_sessions WHERE user_id = $1', [id]);
@@ -494,11 +498,24 @@ class OfficeDatabase {
     return Boolean(rowCount);
   }
 
-  async getAdminAnalytics(days = 7, userId?: string) {
-    const to = new Date();
-    const from = new Date(to);
-    from.setUTCDate(from.getUTCDate() - (days - 1));
-    from.setUTCHours(0, 0, 0, 0);
+  async getAdminAnalytics(days = 7, userId?: string, customFrom?: string, customTo?: string) {
+    const now = new Date();
+    let to = now;
+    let from: Date;
+    if (customFrom && customTo) {
+      from = new Date(`${customFrom}T00:00:00.000Z`);
+      const requestedTo = new Date(`${customTo}T00:00:00.000Z`);
+      requestedTo.setUTCDate(requestedTo.getUTCDate() + 1);
+      to = requestedTo < now ? requestedTo : now;
+      const customDays = Math.ceil((to.getTime() - from.getTime()) / 86_400_000);
+      if (!Number.isFinite(customDays) || customDays < 1) throw new RangeError('The end date must be on or after the start date.');
+      if (customDays > 366) throw new RangeError('Custom analytics ranges are limited to 366 days.');
+      days = customDays;
+    } else {
+      from = new Date(to);
+      from.setUTCDate(from.getUTCDate() - (days - 1));
+      from.setUTCHours(0, 0, 0, 0);
+    }
     const filterUserId = userId || null;
     const [summary, statuses, registrations, members, daily, rooms, sessions, events, tracking] = await Promise.all([
       pool.query(`SELECT
@@ -510,9 +527,9 @@ class OfficeDatabase {
         (SELECT COUNT(*)::int FROM reactions WHERE created_at >= CURRENT_DATE) AS reactions_today`),
       pool.query(`SELECT status, COUNT(*)::int AS count FROM presence_status GROUP BY status ORDER BY status`),
       pool.query(`SELECT day::date::text, COUNT(u.id)::int AS count
-        FROM generate_series(CURRENT_DATE - ($1::int - 1) * INTERVAL '1 day', CURRENT_DATE, INTERVAL '1 day') day
+        FROM generate_series($1::date, ($2::timestamptz - INTERVAL '1 millisecond')::date, INTERVAL '1 day') day
         LEFT JOIN users u ON u.created_at::date = day::date
-        GROUP BY day ORDER BY day`, [Math.min(days, 30)]),
+        GROUP BY day ORDER BY day`, [from, to]),
       pool.query(`SELECT u.id, u.username, u.name, u.role, u.avatar_url, u.is_active, p.status,
           COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM LEAST(COALESCE(s.ended_at, $2::timestamptz), $2::timestamptz) - GREATEST(s.started_at, $1::timestamptz)))) FILTER (WHERE s.id IS NOT NULL), 0)::bigint AS active_seconds,
           COUNT(s.id)::int AS session_count, MIN(s.started_at) AS first_seen, MAX(COALESCE(s.ended_at, $2::timestamptz)) AS last_seen
@@ -520,7 +537,7 @@ class OfficeDatabase {
         LEFT JOIN activity_sessions s ON s.user_id=u.id AND s.started_at < $2 AND COALESCE(s.ended_at, $2) > $1
         WHERE ($3::text IS NULL OR u.id=$3)
         GROUP BY u.id, p.status ORDER BY active_seconds DESC, u.name`, [from, to, filterUserId]),
-      pool.query(`WITH days AS (SELECT generate_series($1::date, $2::date, INTERVAL '1 day') AS day)
+      pool.query(`WITH days AS (SELECT generate_series($1::date, ($2::timestamptz - INTERVAL '1 millisecond')::date, INTERVAL '1 day') AS day)
         SELECT d.day::date::text,
           COALESCE(SUM(GREATEST(0, EXTRACT(EPOCH FROM LEAST(COALESCE(s.ended_at, $2::timestamptz), d.day + INTERVAL '1 day', $2::timestamptz) - GREATEST(s.started_at, d.day, $1::timestamptz)))) FILTER (WHERE s.id IS NOT NULL), 0)::bigint AS active_seconds,
           COUNT(DISTINCT s.user_id)::int AS active_users

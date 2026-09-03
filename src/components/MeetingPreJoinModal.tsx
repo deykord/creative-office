@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Camera, CameraOff, ChevronDown, Mic, MicOff, ShieldCheck, UserRound, X } from 'lucide-react';
+import { Camera, CameraOff, ChevronDown, Mic, MicOff, ShieldCheck, UserRound, Volume2, X } from 'lucide-react';
 import { Room } from '../types';
 
 interface Props {
@@ -13,15 +13,18 @@ interface Props {
   onToggleCamera: () => void;
   audioDevices: MediaDeviceInfo[];
   videoDevices: MediaDeviceInfo[];
+  outputDevices: MediaDeviceInfo[];
   selectedAudioDeviceId: string;
   selectedVideoDeviceId: string;
+  selectedOutputDeviceId: string;
   onSelectAudioDevice: (id: string) => void;
   onSelectVideoDevice: (id: string) => void;
+  onSelectOutputDevice: (id: string) => void;
   onCancel: () => void;
   onConfirm: () => void;
 }
 
-export const MeetingPreJoinModal: React.FC<Props> = ({ room, busy, error, previewStream, micOn, cameraOn, onToggleMic, onToggleCamera, audioDevices, videoDevices, selectedAudioDeviceId, selectedVideoDeviceId, onSelectAudioDevice, onSelectVideoDevice, onCancel, onConfirm }) => {
+export const MeetingPreJoinModal: React.FC<Props> = ({ room, busy, error, previewStream, micOn, cameraOn, onToggleMic, onToggleCamera, audioDevices, videoDevices, outputDevices, selectedAudioDeviceId, selectedVideoDeviceId, selectedOutputDeviceId, onSelectAudioDevice, onSelectVideoDevice, onSelectOutputDevice, onCancel, onConfirm }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -39,6 +42,7 @@ export const MeetingPreJoinModal: React.FC<Props> = ({ room, busy, error, previe
             {cameraOn && previewStream?.getVideoTracks().some((track) => track.readyState === 'live') ? <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" /> : <div className="flex flex-col items-center"><span className="w-24 h-24 rounded-full bg-[#23242a] border border-white/[.08] flex items-center justify-center"><UserRound className="w-9 h-9 text-zinc-600" /></span><p className="text-xs text-zinc-500 mt-4">Camera is off</p></div>}
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 rounded-2xl border border-white/[.1] bg-black/70 backdrop-blur-xl p-2 shadow-xl">
               <div className="flex overflow-hidden rounded-xl border border-white/[.12]"><button type="button" onClick={onToggleMic} disabled={busy} title={micOn ? 'Turn microphone off before joining' : 'Turn microphone on before joining'} className={`w-11 h-11 flex items-center justify-center transition ${micOn ? 'bg-white/[.08] text-white' : 'bg-red-400/15 text-red-300'}`}>{micOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}</button><label className="relative flex w-7 items-center justify-center border-l border-white/[.1] bg-white/[.05]" title="Choose microphone"><ChevronDown className="h-3 w-3 text-zinc-400"/><select aria-label="Choose microphone" value={selectedAudioDeviceId} onChange={(event) => onSelectAudioDevice(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0">{audioDevices.length ? audioDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Microphone ${index + 1}`}</option>) : <option value="">Default microphone</option>}</select></label></div>
+              <label className="relative flex h-11 w-12 items-center justify-center rounded-xl border border-white/[.12] bg-white/[.05]" title="Choose speaker"><Volume2 className="h-5 w-5 text-zinc-300"/><ChevronDown className="ml-0.5 h-3 w-3 text-zinc-500"/><select aria-label="Choose speaker before joining" value={selectedOutputDeviceId} onChange={(event) => onSelectOutputDevice(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0">{outputDevices.length ? outputDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Speaker ${index + 1}`}</option>) : <option value="">System default speaker</option>}</select></label>
               <div className="flex overflow-hidden rounded-xl border border-white/[.12]"><button type="button" onClick={onToggleCamera} disabled={busy} title={cameraOn ? 'Turn camera off before joining' : 'Turn camera on before joining'} className={`w-11 h-11 flex items-center justify-center transition ${cameraOn ? 'bg-white/[.08] text-white' : 'bg-red-400/15 text-red-300'}`}>{cameraOn ? <Camera className="w-5 h-5" /> : <CameraOff className="w-5 h-5" />}</button><label className="relative flex w-7 items-center justify-center border-l border-white/[.1] bg-white/[.05]" title="Choose camera"><ChevronDown className="h-3 w-3 text-zinc-400"/><select aria-label="Choose camera" value={selectedVideoDeviceId} onChange={(event) => onSelectVideoDevice(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0">{videoDevices.length ? videoDevices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>) : <option value="">Default camera</option>}</select></label></div>
             </div>
           </div>

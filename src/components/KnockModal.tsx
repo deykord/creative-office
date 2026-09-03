@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { KnockEvent, User } from '../types';
-import { Hand, PhoneCall } from 'lucide-react';
+import { Hand, PhoneCall, PhoneOff } from 'lucide-react';
 
 interface KnockModalProps {
   knock: KnockEvent | null;
@@ -17,6 +17,71 @@ export const KnockModal: React.FC<KnockModalProps> = ({
   onDecline,
   onCancelOutgoing,
 }) => {
+  const acceptButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!knock) return;
+    acceptButtonRef.current?.focus();
+
+    const keepDecisionInForeground = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const dialog = acceptButtonRef.current?.closest('[role="alertdialog"]');
+      const buttons: HTMLButtonElement[] = dialog
+        ? Array.from(dialog.querySelectorAll('button:not(:disabled)')) as HTMLButtonElement[]
+        : [];
+      if (!buttons.length) return;
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', keepDecisionInForeground, true);
+    return () => document.removeEventListener('keydown', keepDecisionInForeground, true);
+  }, [knock?.id]);
+
+  // Incoming requests always take priority, including when both people knock at once.
+  if (knock) {
+    return (
+      <div data-knock-ringing="true" className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-xl animate-in fade-in duration-150">
+        <section role="alertdialog" aria-modal="true" aria-labelledby="incoming-knock-title" aria-describedby="incoming-knock-description" className="relative w-full max-w-[390px] overflow-hidden rounded-[28px] border border-amber-300/35 bg-[#151519]/98 p-6 text-center shadow-[0_35px_140px_rgba(0,0,0,.9),0_0_65px_rgba(217,163,74,.16)] sm:p-8">
+          <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/70 to-transparent" />
+          <div className="relative mx-auto mb-5 h-24 w-24">
+            <span className="absolute inset-0 animate-ping rounded-full border border-amber-300/25" />
+            <img src={knock.fromUserAvatar} alt="" className="relative h-24 w-24 rounded-full object-cover ring-2 ring-amber-300/75 shadow-[0_0_30px_rgba(217,163,74,.24)]" />
+            <span className="absolute -bottom-1 -right-1 flex h-9 w-9 items-center justify-center rounded-full border-4 border-[#151519] bg-amber-300 text-zinc-950 shadow-lg"><Hand className="h-4 w-4" /></span>
+          </div>
+
+          <p className="text-[10px] font-semibold uppercase tracking-[.22em] text-amber-300">Incoming door knock</p>
+          <h2 id="incoming-knock-title" className="mt-2 text-xl font-semibold text-white sm:text-2xl">{knock.fromUserName}</h2>
+          <p id="incoming-knock-description" className="mt-2 text-sm leading-5 text-zinc-400">{knock.message || 'Wants to enter your office for a quick conversation.'}</p>
+          <p className="mt-4 text-[10px] text-zinc-600">Choose an action to continue working</p>
+
+          <div className="mt-6 grid grid-cols-2 gap-3">
+            <button type="button" onClick={onDecline} className="flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-white/[.1] bg-white/[.045] px-4 text-sm font-semibold text-zinc-300 transition hover:border-red-300/25 hover:bg-red-400/[.09] hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/70">
+              <PhoneOff className="h-4 w-4" />
+              Decline
+            </button>
+            <button ref={acceptButtonRef} type="button" onClick={onAccept} className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-emerald-400 px-4 text-sm font-bold text-emerald-950 shadow-[0_12px_35px_rgba(52,211,153,.2)] transition hover:bg-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200 focus-visible:ring-offset-2 focus-visible:ring-offset-[#151519] active:scale-[.98]">
+              <PhoneCall className="h-4 w-4" />
+              Accept
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   // Outgoing knock has a server-enforced 30 second timeout.
   if (outgoingTargetUser) {
     return (
@@ -43,50 +108,5 @@ export const KnockModal: React.FC<KnockModalProps> = ({
     );
   }
 
-  if (!knock) return null;
-
-  return (
-    <div data-knock-ringing="true" className="fixed bottom-20 right-6 z-[130] bg-[#1A1A1C] border-2 border-[#D9A34A] rounded-2xl shadow-2xl p-4 max-w-sm w-full animate-in slide-in-from-bottom-5 fade-in duration-200">
-      <div className="flex items-start space-x-3">
-        <div className="relative">
-          <img
-            src={knock.fromUserAvatar}
-            alt={knock.fromUserName}
-            className="w-12 h-12 rounded-xl object-cover ring-2 ring-[#D9A34A]"
-          />
-          <div className="absolute -top-1 -right-1 bg-[#D9A34A] text-black p-1 rounded-full shadow-lg">
-            <Hand className="w-3.5 h-3.5" />
-          </div>
-        </div>
-
-        <div className="flex-1">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-bold text-white">{knock.fromUserName}</h4>
-            <span className="text-[10px] text-[#D9A34A] font-semibold uppercase">Drop-in Request</span>
-          </div>
-
-          <p className="text-xs text-zinc-300 mt-1 font-medium bg-[#111113] p-2 rounded-lg border border-[#2D2D30]">
-            "{knock.message || `Hey! Want to drop in for a quick chat?`}"
-          </p>
-
-          <div className="mt-3 flex items-center space-x-2">
-            <button
-              onClick={onAccept}
-              className="flex-1 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md transition active:scale-95"
-            >
-              <PhoneCall className="w-3.5 h-3.5" />
-              <span>Accept & Join</span>
-            </button>
-
-            <button
-              onClick={onDecline}
-              className="bg-[#2D2D30] hover:bg-[#3D3D42] text-zinc-300 py-1.5 px-3 rounded-xl text-xs font-semibold border border-[#3D3D42] transition"
-            >
-              Decline
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 };
