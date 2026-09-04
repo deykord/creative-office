@@ -80,16 +80,16 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
   };
 
   return (
-    <footer id="bottom-toolbar-container" className="relative z-[60] h-[calc(3.5rem+env(safe-area-inset-bottom))] shrink-0 select-none border-t border-white/[.055] bg-[#08090b]/96 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-2xl sm:h-16 sm:px-3 sm:pb-0 md:px-4">
-      <div id="chat-toolbar-slot" className="absolute left-2 top-7 -translate-y-1/2 sm:left-3 sm:top-1/2" />
+    <footer id="bottom-toolbar-container" className="relative z-[60] h-[calc(6.5rem+env(safe-area-inset-bottom))] shrink-0 select-none border-t border-white/[.055] bg-[#08090b]/96 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-2xl sm:h-16 sm:px-3 sm:pb-0 md:px-4">
+      <div id="chat-toolbar-slot" className="absolute bottom-[calc(.55rem+env(safe-area-inset-bottom))] left-2 sm:bottom-auto sm:left-3 sm:top-1/2 sm:-translate-y-1/2" />
 
-      <div className="absolute left-14 top-7 flex -translate-y-1/2 items-center gap-0.5 rounded-[14px] border border-white/[.08] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.35)] sm:left-16 sm:top-1/2 sm:rounded-[16px] sm:p-1">
+      <div className="absolute bottom-[calc(.65rem+env(safe-area-inset-bottom))] left-14 flex items-center gap-0.5 rounded-[14px] border border-white/[.08] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.35)] sm:bottom-auto sm:left-16 sm:top-1/2 sm:-translate-y-1/2 sm:rounded-[16px] sm:p-1">
         <button type="button" onClick={onOpenStories} aria-label="Open stories" title="Stories" className={`flex h-7 w-7 items-center justify-center rounded-xl transition sm:h-8 sm:w-8 ${storiesOpen ? 'bg-pink-400/10 text-pink-300' : 'text-zinc-500 hover:bg-white/[.06] hover:text-white'}`}><CirclePlay className="h-4 w-4" /></button>
         <button type="button" onClick={onOpenCalendar} aria-label="Open calendar" title="Calendar" className={`flex h-7 w-7 items-center justify-center rounded-xl transition sm:h-8 sm:w-8 ${calendarOpen ? 'bg-amber-300/10 text-amber-300' : 'text-zinc-500 hover:bg-white/[.06] hover:text-white'}`}><CalendarDays className="h-4 w-4" /></button>
       </div>
 
       {/* Center Controls: Mic, Camera, Reaction, Screen Share */}
-      <div className="absolute left-1/2 top-7 flex -translate-x-1/2 -translate-y-1/2 items-center space-x-0 rounded-[16px] border border-white/[.09] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.42)] sm:top-1/2 sm:space-x-1 sm:rounded-[18px] sm:p-1">
+      <div className="absolute left-1/2 top-2 flex -translate-x-1/2 items-center space-x-0 rounded-[16px] border border-white/[.09] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.42)] sm:top-1/2 sm:-translate-y-1/2 sm:space-x-1 sm:rounded-[18px] sm:p-1">
         {/* Mic Toggle */}
         <div className={`flex h-8 overflow-hidden rounded-xl border sm:h-9 ${isMuted ? 'border-red-500/40 bg-red-500/20 text-red-400' : 'border-[#2D2D30] bg-[#1A1A1C] text-[#E0E0E0]'}`}>
           <button
@@ -187,7 +187,7 @@ export const BottomToolbar: React.FC<BottomToolbarProps> = ({
       </div>
 
       {/* Right: compact utility dock and shelf */}
-      <div className="absolute right-2 top-7 flex -translate-y-1/2 items-center gap-0.5 rounded-[16px] border border-white/[.09] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.42)] sm:right-3 sm:top-1/2 sm:rounded-[18px] sm:p-1">
+      <div className="absolute bottom-[calc(.65rem+env(safe-area-inset-bottom))] right-2 flex items-center gap-0.5 rounded-[16px] border border-white/[.09] bg-[#15161b]/96 p-0.5 shadow-[0_15px_45px_rgba(0,0,0,.42)] sm:bottom-auto sm:right-3 sm:top-1/2 sm:-translate-y-1/2 sm:rounded-[18px] sm:p-1">
         {utilityNotice && <span role="status" className="absolute bottom-12 right-0 whitespace-nowrap rounded-xl border border-white/[.09] bg-[#17181d]/98 px-3 py-2 text-[10px] text-zinc-300 shadow-xl">{utilityNotice}</span>}
         <button type="button" onClick={onRequestPictureInPicture} aria-label="Open mini office" title="Open mini office" className="flex h-8 w-8 items-center justify-center rounded-xl text-cyan-300/80 transition hover:bg-cyan-300/[.08] hover:text-cyan-200 md:hidden"><PictureInPicture2 className="h-4 w-4" /></button>
         {isOwner && <button type="button" onClick={onOpenOwnerDashboard} aria-label={dashboardLabel} title={dashboardLabel} className={`flex h-8 w-8 items-center justify-center rounded-xl transition ${ownerDashboardOpen ? 'bg-amber-300/10 text-amber-300' : 'text-amber-300/75 hover:bg-amber-300/[.08] hover:text-amber-200'}`}><LayoutDashboard className="h-4 w-4" /></button>}

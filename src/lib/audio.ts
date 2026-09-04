@@ -13,9 +13,16 @@ function getAudioContext(): AudioContext {
     if (sinkContext.setSinkId) void sinkContext.setSinkId(savedOutput).catch(() => undefined);
   }
   if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
+    void audioCtx.resume().catch(() => undefined);
   }
   return audioCtx;
+}
+
+/** Unlocks Web Audio from a real user gesture so later socket events can make sound. */
+export async function prepareNotificationAudio(): Promise<void> {
+  if (isAudioMuted) return;
+  const ctx = getAudioContext();
+  if (ctx.state === 'suspended') await ctx.resume();
 }
 
 export async function setNotificationAudioOutput(deviceId: string) {
@@ -109,27 +116,30 @@ function playTap(ctx: AudioContext, time: number, freq: number, duration: number
   osc.stop(time + duration);
 }
 
-/** Plays a short, unobtrusive two-note alert for an incoming chat message. */
-export function playMessageNotificationSound() {
+/** Plays a clear, compact alert for an incoming chat message. */
+export async function playMessageNotificationSound(): Promise<void> {
   if (isAudioMuted) return;
   try {
     const ctx = getAudioContext();
+    if (ctx.state === 'suspended') await ctx.resume();
+    if (ctx.state !== 'running') return;
     const now = ctx.currentTime;
-    playChimeTone(ctx, now, 740, 0.1);
-    playChimeTone(ctx, now + 0.09, 988, 0.16);
+    playChimeTone(ctx, now, 659.25, 0.13, 0.14);
+    playChimeTone(ctx, now + 0.11, 880, 0.18, 0.17);
+    playChimeTone(ctx, now + 0.24, 1046.5, 0.22, 0.12);
   } catch (err) {
     console.warn('Message notification sound failed:', err);
   }
 }
 
-function playChimeTone(ctx: AudioContext, time: number, freq: number, duration: number) {
+function playChimeTone(ctx: AudioContext, time: number, freq: number, duration: number, volume: number) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
 
   osc.type = 'sine';
   osc.frequency.setValueAtTime(freq, time);
 
-  gain.gain.setValueAtTime(0.08, time);
+  gain.gain.setValueAtTime(volume, time);
   gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
 
   osc.connect(gain);

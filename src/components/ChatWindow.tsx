@@ -4,7 +4,7 @@ import { Maximize2, MessageCircle, Minimize2, Minus, X } from 'lucide-react';
 import { ChatMessage, User } from '../types';
 import { getSocket } from '../lib/socket';
 import { ChatPanel } from './ChatPanel';
-import { playMessageNotificationSound } from '../lib/audio';
+import { playMessageNotificationSound, prepareNotificationAudio } from '../lib/audio';
 
 interface Props {
   currentUser: User;
@@ -55,6 +55,29 @@ export const ChatWindow: React.FC<Props> = ({ currentUser, users, open, selected
     setToolbarTarget(document.getElementById('chat-toolbar-slot'));
   }, []);
 
+  useEffect(() => {
+    const unlockAudio = () => { void prepareNotificationAudio().catch(() => undefined); };
+    window.addEventListener('pointerdown', unlockAudio, { capture: true, once: true });
+    window.addEventListener('keydown', unlockAudio, { capture: true, once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio, true);
+      window.removeEventListener('keydown', unlockAudio, true);
+    };
+  }, []);
+
+  const enableChatNotifications = () => {
+    void prepareNotificationAudio().catch(() => undefined);
+    if ('Notification' in window && Notification.permission === 'default') {
+      void Notification.requestPermission().catch(() => undefined);
+    }
+  };
+
+  const openChat = (conversationId?: string) => {
+    enableChatNotifications();
+    if (conversationId) onSelectConversation(conversationId);
+    onOpen();
+  };
+
   const refreshUnread = useCallback(() => {
     void fetch('/api/chat/conversations').then((response) => response.ok ? response.json() : []).then((items) => {
       setUnread(items.reduce((total: number, item: { unreadCount?: number }) => total + Number(item.unreadCount || 0), 0));
@@ -68,14 +91,28 @@ export const ChatWindow: React.FC<Props> = ({ currentUser, users, open, selected
     const onMessage = (message: ChatMessage) => {
       refreshUnread();
       if (message.messageType !== 'text' || message.senderId === currentUser.id || message.deletedAt) return;
-      playMessageNotificationSound();
+      void playMessageNotificationSound();
       const notification = { id: message.id, conversationId: message.conversationId, sender: message.sender?.name || 'Office member', avatarUrl: message.sender?.avatarUrl, content: message.content };
       setNotifications((previous) => [...previous.filter((item) => item.id !== message.id), notification].slice(-3));
+      if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
+        const nativeNotification = new Notification(notification.sender, {
+          body: notification.content,
+          icon: notification.avatarUrl || '/creativeprocess-mark.svg',
+          badge: '/creativeprocess-mark.svg',
+          tag: `creativeprocess-chat-${message.conversationId}`,
+        });
+        nativeNotification.onclick = () => {
+          window.focus();
+          onSelectConversation(message.conversationId);
+          onOpen();
+          nativeNotification.close();
+        };
+      }
       window.clearTimeout(notificationTimers.current.get(message.id));
       notificationTimers.current.set(message.id, window.setTimeout(() => {
         setNotifications((previous) => previous.filter((item) => item.id !== message.id));
         notificationTimers.current.delete(message.id);
-      }, 4500));
+      }, 7000));
     };
     const refresh = () => refreshUnread();
     socket.on('chat:message', onMessage);
@@ -134,9 +171,9 @@ export const ChatWindow: React.FC<Props> = ({ currentUser, users, open, selected
     setNotifications((previous) => previous.filter((item) => item.id !== id));
   };
   const notificationLayer = <div aria-live="polite" aria-label="Message notifications" className="pointer-events-none fixed right-2 top-[4.15rem] z-[110] flex max-h-[calc(100dvh-8rem)] w-auto flex-col gap-2 overflow-y-auto sm:right-3 sm:top-16 sm:w-[min(310px,calc(100vw-1rem))]">
-    {!open && unreadItems.length > 0 && <><aside aria-label="Unread messages" className="pointer-events-auto sm:hidden"><button type="button" onClick={() => { onSelectConversation(unreadItems[0].id); onOpen(); }} className="flex h-8 items-center gap-1.5 rounded-full border border-amber-300/20 bg-[#15161b]/95 px-2.5 text-[9px] font-semibold text-zinc-200 shadow-[0_10px_35px_rgba(0,0,0,.48)] backdrop-blur-xl"><MessageCircle className="h-3 w-3 text-amber-300"/><span>{unread > 99 ? '99+' : unread} unread</span></button></aside><aside aria-label="Unread messages" className="pointer-events-auto hidden rounded-2xl border border-white/[.1] bg-[#14151a]/97 p-2.5 shadow-[0_22px_70px_rgba(0,0,0,.58)] backdrop-blur-2xl sm:block"><div className="flex items-center justify-between px-1 pb-2"><span className="text-[10px] font-semibold uppercase tracking-[.15em] text-zinc-400">Unread messages</span><span className="rounded-full bg-amber-300 px-1.5 py-0.5 text-[9px] font-bold text-black">{unread}</span></div><div className="space-y-1">{unreadItems.slice(0, 8).map((item) => { const other = item.type === 'dm' ? item.members?.find((member) => member.id !== currentUser.id) : undefined; const title = item.name || other?.name || 'Conversation'; return <button key={item.id} type="button" onClick={() => { onSelectConversation(item.id); onOpen(); }} className="flex w-full items-center gap-2.5 rounded-xl border border-transparent bg-white/[.025] p-2.5 text-left hover:border-white/[.08] hover:bg-white/[.05]">{other?.avatarUrl ? <img src={other.avatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover"/> : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-400/10 text-indigo-300"><MessageCircle className="h-3.5 w-3.5"/></span>}<span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-semibold text-zinc-200">{title}</span><span className="mt-0.5 block truncate text-[9px] text-zinc-500">{item.lastMessage?.content || 'New activity'}</span></span><span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-300 px-1 text-[9px] font-bold text-black">{item.unreadCount}</span></button>; })}</div></aside></>}
-    {notifications.filter((notification) => !unreadItems.some((item) => item.id === notification.conversationId)).map((notification) => <div key={notification.id} role="status" className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-white/[.1] bg-[#18191e]/95 p-3 shadow-[0_18px_55px_rgba(0,0,0,.55)] backdrop-blur-xl animate-[fadeIn_.18s_ease-out]">
-      <button type="button" onClick={() => { dismissNotification(notification.id); onSelectConversation(notification.conversationId); onOpen(); }} className="flex min-w-0 flex-1 items-start gap-3 text-left">
+    {!open && unreadItems.length > 0 && <><aside aria-label="Unread messages" className="pointer-events-auto sm:hidden"><button type="button" onClick={() => openChat(unreadItems[0].id)} className="flex h-8 items-center gap-1.5 rounded-full border border-amber-300/20 bg-[#15161b]/95 px-2.5 text-[9px] font-semibold text-zinc-200 shadow-[0_10px_35px_rgba(0,0,0,.48)] backdrop-blur-xl"><MessageCircle className="h-3 w-3 text-amber-300"/><span>{unread > 99 ? '99+' : unread} unread</span></button></aside><aside aria-label="Unread messages" className="pointer-events-auto hidden rounded-2xl border border-white/[.1] bg-[#14151a]/97 p-2.5 shadow-[0_22px_70px_rgba(0,0,0,.58)] backdrop-blur-2xl sm:block"><div className="flex items-center justify-between px-1 pb-2"><span className="text-[10px] font-semibold uppercase tracking-[.15em] text-zinc-400">Unread messages</span><span className="rounded-full bg-amber-300 px-1.5 py-0.5 text-[9px] font-bold text-black">{unread}</span></div><div className="space-y-1">{unreadItems.slice(0, 8).map((item) => { const other = item.type === 'dm' ? item.members?.find((member) => member.id !== currentUser.id) : undefined; const title = item.name || other?.name || 'Conversation'; return <button key={item.id} type="button" onClick={() => openChat(item.id)} className="flex w-full items-center gap-2.5 rounded-xl border border-transparent bg-white/[.025] p-2.5 text-left hover:border-white/[.08] hover:bg-white/[.05]">{other?.avatarUrl ? <img src={other.avatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover"/> : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-400/10 text-indigo-300"><MessageCircle className="h-3.5 w-3.5"/></span>}<span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-semibold text-zinc-200">{title}</span><span className="mt-0.5 block truncate text-[9px] text-zinc-500">{item.lastMessage?.content || 'New activity'}</span></span><span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-300 px-1 text-[9px] font-bold text-black">{item.unreadCount}</span></button>; })}</div></aside></>}
+    {notifications.map((notification) => <div key={notification.id} role="status" className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-white/[.1] bg-[#18191e]/95 p-3 shadow-[0_18px_55px_rgba(0,0,0,.55)] backdrop-blur-xl animate-[fadeIn_.18s_ease-out]">
+      <button type="button" onClick={() => { dismissNotification(notification.id); openChat(notification.conversationId); }} className="flex min-w-0 flex-1 items-start gap-3 text-left">
         {notification.avatarUrl ? <img src={notification.avatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" /> : <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-300"><MessageCircle className="h-3.5 w-3.5" /></span>}
         <span className="min-w-0"><span className="block truncate text-[11px] font-semibold text-zinc-100">{notification.sender}</span><span className="mt-1 block truncate text-[10px] text-zinc-500">{notification.content}</span></span>
       </button>
@@ -144,7 +181,7 @@ export const ChatWindow: React.FC<Props> = ({ currentUser, users, open, selected
     </div>)}
   </div>;
 
-  if (!open) return <>{toolbarTarget && createPortal(<button type="button" onClick={onOpen} aria-label="Open messages" title="Messages" className="relative flex h-9 w-9 items-center justify-center rounded-[14px] border border-amber-300/20 bg-amber-300/[.07] text-amber-200/80 shadow-[0_10px_30px_rgba(0,0,0,.3)] transition hover:border-amber-300/35 hover:bg-amber-300/[.12] hover:text-amber-200"><MessageCircle className="h-[17px] w-[17px]" />{unread > 0 && <span aria-label={`${unread} unread messages`} className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-[#08090b] bg-amber-300 px-1 text-[8px] font-bold leading-none text-black">{unread > 99 ? '99+' : unread}</span>}</button>, toolbarTarget)}{notificationLayer}</>;
+  if (!open) return <>{toolbarTarget && createPortal(<button type="button" onClick={() => openChat()} aria-label="Open messages" title="Messages" className="relative flex h-9 w-9 items-center justify-center rounded-[14px] border border-amber-300/20 bg-amber-300/[.07] text-amber-200/80 shadow-[0_10px_30px_rgba(0,0,0,.3)] transition hover:border-amber-300/35 hover:bg-amber-300/[.12] hover:text-amber-200"><MessageCircle className="h-[17px] w-[17px]" />{unread > 0 && <span aria-label={`${unread} unread messages`} className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full border border-[#08090b] bg-amber-300 px-1 text-[8px] font-bold leading-none text-black">{unread > 99 ? '99+' : unread}</span>}</button>, toolbarTarget)}{notificationLayer}</>;
 
   if (minimized) return <><section role="dialog" aria-label="Messages" className="fixed right-2 sm:right-5 bottom-24 z-[90] w-[min(310px,calc(100vw-1rem))] h-12 rounded-2xl border border-white/[.1] bg-[#15161b]/98 shadow-[0_22px_65px_rgba(0,0,0,.6)] backdrop-blur-xl flex items-center px-3"><span className="w-7 h-7 rounded-lg bg-amber-300/10 text-amber-300 flex items-center justify-center"><MessageCircle className="w-3.5 h-3.5" /></span><button type="button" onClick={() => setMinimized(false)} className="flex-1 h-full px-3 text-left text-xs font-semibold">Messages{unread > 0 ? ` · ${unread} new` : ''}</button><button type="button" title="Close messages" onClick={onClose} className="p-2 text-zinc-600 hover:text-white"><X className="w-3.5 h-3.5" /></button></section>{notificationLayer}</>;
 

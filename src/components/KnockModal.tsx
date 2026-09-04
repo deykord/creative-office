@@ -53,21 +53,21 @@ export const KnockModal: React.FC<KnockModalProps> = ({
   // Incoming requests always take priority, including when both people knock at once.
   if (knock) {
     return (
-      <div data-knock-ringing="true" className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 p-4 backdrop-blur-xl animate-in fade-in duration-150">
-        <section role="alertdialog" aria-modal="true" aria-labelledby="incoming-knock-title" aria-describedby="incoming-knock-description" className="relative w-full max-w-[390px] overflow-hidden rounded-[28px] border border-amber-300/35 bg-[#151519]/98 p-6 text-center shadow-[0_35px_140px_rgba(0,0,0,.9),0_0_65px_rgba(217,163,74,.16)] sm:p-8">
+      <div data-knock-ringing="true" className="fixed inset-0 z-[300] flex items-center justify-center overflow-y-auto bg-black/80 px-3 py-[max(.75rem,env(safe-area-inset-top))] backdrop-blur-xl animate-in fade-in duration-150 sm:p-4">
+        <section role="alertdialog" aria-modal="true" aria-labelledby="incoming-knock-title" aria-describedby="incoming-knock-description" className="relative my-auto w-full max-w-[390px] overflow-hidden rounded-[24px] border border-amber-300/35 bg-[#151519]/98 p-5 text-center shadow-[0_35px_140px_rgba(0,0,0,.9),0_0_65px_rgba(217,163,74,.16)] sm:rounded-[28px] sm:p-8">
           <div className="pointer-events-none absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-amber-200/70 to-transparent" />
-          <div className="relative mx-auto mb-5 h-24 w-24">
+          <div className="relative mx-auto mb-4 h-20 w-20 sm:mb-5 sm:h-24 sm:w-24">
             <span className="absolute inset-0 animate-ping rounded-full border border-amber-300/25" />
-            <img src={knock.fromUserAvatar} alt="" className="relative h-24 w-24 rounded-full object-cover ring-2 ring-amber-300/75 shadow-[0_0_30px_rgba(217,163,74,.24)]" />
+            <img src={knock.fromUserAvatar} alt="" className="relative h-20 w-20 rounded-full object-cover ring-2 ring-amber-300/75 shadow-[0_0_30px_rgba(217,163,74,.24)] sm:h-24 sm:w-24" />
             <span className="absolute -bottom-1 -right-1 flex h-9 w-9 items-center justify-center rounded-full border-4 border-[#151519] bg-amber-300 text-zinc-950 shadow-lg"><Hand className="h-4 w-4" /></span>
           </div>
 
           <p className="text-[10px] font-semibold uppercase tracking-[.22em] text-amber-300">Incoming door knock</p>
-          <h2 id="incoming-knock-title" className="mt-2 text-xl font-semibold text-white sm:text-2xl">{knock.fromUserName}</h2>
-          <p id="incoming-knock-description" className="mt-2 text-sm leading-5 text-zinc-400">{knock.message || 'Wants to enter your office for a quick conversation.'}</p>
-          <p className="mt-4 text-[10px] text-zinc-600">Choose an action to continue working</p>
+          <h2 id="incoming-knock-title" className="mt-1.5 text-lg font-semibold text-white sm:mt-2 sm:text-2xl">{knock.fromUserName}</h2>
+          <p id="incoming-knock-description" className="mt-1.5 text-xs leading-5 text-zinc-400 sm:mt-2 sm:text-sm">{knock.message || 'Wants to enter your office for a quick conversation.'}</p>
+          <p className="mt-2.5 text-[9px] text-zinc-600 sm:mt-4 sm:text-[10px]">Choose an action to continue working</p>
 
-          <div className="mt-6 grid grid-cols-2 gap-3">
+          <div className="mt-4 grid grid-cols-2 gap-2.5 sm:mt-6 sm:gap-3">
             <button type="button" onClick={onDecline} className="flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-white/[.1] bg-white/[.045] px-4 text-sm font-semibold text-zinc-300 transition hover:border-red-300/25 hover:bg-red-400/[.09] hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/70">
               <PhoneOff className="h-4 w-4" />
               Decline
