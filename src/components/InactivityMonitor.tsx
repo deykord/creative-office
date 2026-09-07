@@ -3,16 +3,16 @@ import { Clock3, MousePointer2 } from 'lucide-react';
 
 type IdlePhase = 'active' | 'afk' | 'offline';
 
-const AFK_AFTER_MS = 10 * 60 * 1000;
-const OFFLINE_AFTER_MS = 30 * 60 * 1000;
-
 interface Props {
+  enabled?: boolean;
+  afkAfterMinutes?: number;
+  offlineAfterMinutes?: number;
   onAfk: () => void;
   onOffline: () => void;
   onRestore: (wasOffline: boolean) => void;
 }
 
-export const InactivityMonitor: React.FC<Props> = ({ onAfk, onOffline, onRestore }) => {
+export const InactivityMonitor: React.FC<Props> = ({ enabled = true, afkAfterMinutes = 10, offlineAfterMinutes = 30, onAfk, onOffline, onRestore }) => {
   const [phase, setPhase] = useState<IdlePhase>('active');
   const phaseRef = useRef<IdlePhase>('active');
   const lastActivityRef = useRef(Date.now());
@@ -22,6 +22,17 @@ export const InactivityMonitor: React.FC<Props> = ({ onAfk, onOffline, onRestore
   callbacksRef.current = { onAfk, onOffline, onRestore };
 
   useEffect(() => {
+    if (!enabled) {
+      const wasOffline = phaseRef.current === 'offline';
+      const needsRestore = phaseRef.current !== 'active';
+      phaseRef.current = 'active';
+      setPhase('active');
+      lastActivityRef.current = Date.now();
+      if (needsRestore) callbacksRef.current.onRestore(wasOffline);
+      return;
+    }
+    const afkAfterMs = afkAfterMinutes * 60 * 1000;
+    const offlineAfterMs = offlineAfterMinutes * 60 * 1000;
     const changePhase = (next: IdlePhase) => {
       phaseRef.current = next;
       setPhase(next);
@@ -29,10 +40,10 @@ export const InactivityMonitor: React.FC<Props> = ({ onAfk, onOffline, onRestore
 
     const evaluate = () => {
       const elapsed = Date.now() - lastActivityRef.current;
-      if (elapsed >= OFFLINE_AFTER_MS && phaseRef.current !== 'offline') {
+      if (elapsed >= offlineAfterMs && phaseRef.current !== 'offline') {
         changePhase('offline');
         callbacksRef.current.onOffline();
-      } else if (elapsed >= AFK_AFTER_MS && phaseRef.current === 'active') {
+      } else if (elapsed >= afkAfterMs && phaseRef.current === 'active') {
         changePhase('afk');
         callbacksRef.current.onAfk();
       }
@@ -62,7 +73,7 @@ export const InactivityMonitor: React.FC<Props> = ({ onAfk, onOffline, onRestore
       document.removeEventListener('visibilitychange', evaluate);
       events.forEach((eventName) => window.removeEventListener(eventName, registerActivity));
     };
-  }, []);
+  }, [enabled, afkAfterMinutes, offlineAfterMinutes]);
 
   if (phase === 'active') return null;
 
@@ -80,8 +91,8 @@ export const InactivityMonitor: React.FC<Props> = ({ onAfk, onOffline, onRestore
           <p className="text-sm font-semibold text-zinc-100">{phase === 'afk' ? 'You are marked AFK' : 'Office presence paused'}</p>
           <p className="mt-1 text-xs leading-5 text-zinc-400">
             {phase === 'afk'
-              ? 'No activity was detected in the office for 10 minutes. Move your mouse or press a key here to return.'
-              : 'You have been away for 30 minutes. Move your mouse or press a key here to return to your personal office.'}
+              ? `No activity was detected in the office for ${afkAfterMinutes} ${afkAfterMinutes === 1 ? 'minute' : 'minutes'}. Move your mouse or press a key here to return.`
+              : `You have been away for ${offlineAfterMinutes} minutes. Move your mouse or press a key here to return to your personal office.`}
           </p>
         </div>
       </div>

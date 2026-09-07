@@ -27,6 +27,9 @@ function mapUser(row: Record<string, unknown>): User {
     teamName: row.team_name ? String(row.team_name) : undefined,
     isAdmin: Boolean(row.is_admin),
     canViewAnalytics: Boolean(row.can_view_analytics),
+    afkEnabled: row.afk_enabled === undefined ? true : Boolean(row.afk_enabled),
+    afkAfterMinutes: Number(row.afk_after_minutes || 10),
+    offlineAfterMinutes: Number(row.offline_after_minutes || 30),
     isActive: row.is_active === undefined ? true : Boolean(row.is_active),
     createdAt: row.created_at ? new Date(String(row.created_at)).toISOString() : undefined,
     officeIntroSeen: Boolean(row.office_intro_seen),
@@ -87,6 +90,9 @@ class OfficeDatabase {
     await pool.query(ddl);
     await pool.query('ALTER TABLE presence_status DROP COLUMN IF EXISTS current_music, DROP COLUMN IF EXISTS custom_status');
     await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS can_view_analytics BOOLEAN NOT NULL DEFAULT false');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS afk_enabled BOOLEAN NOT NULL DEFAULT true');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS afk_after_minutes INT NOT NULL DEFAULT 10');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS offline_after_minutes INT NOT NULL DEFAULT 30');
     const { rows: floorRows } = await pool.query('SELECT id FROM floors ORDER BY sort_order, created_at LIMIT 1');
     const mainFloorId = floorRows[0].id;
     await pool.query('UPDATE users SET default_floor_id=$1 WHERE default_floor_id IS NULL', [mainFloorId]);
@@ -141,13 +147,13 @@ class OfficeDatabase {
     return { ...mapUser(rows[0]), passwordHash: rows[0].password_hash, isAdmin: rows[0].is_admin };
   }
 
-  async createUser(input: { id: string; username: string; passwordHash: string; name: string; email?: string; role?: string; isAdmin?: boolean; defaultFloorId?: string; gender?: 'male' | 'female' }): Promise<User> {
+  async createUser(input: { id: string; username: string; passwordHash: string; name: string; email?: string; role?: string; isAdmin?: boolean; defaultFloorId?: string; gender?: 'male' | 'female'; afkEnabled?: boolean; afkAfterMinutes?: number; offlineAfterMinutes?: number }): Promise<User> {
     return inTransaction(async (client) => {
       const floorId = input.defaultFloorId || (await client.query('SELECT id FROM floors ORDER BY sort_order, created_at LIMIT 1')).rows[0]?.id;
       const { rows } = await client.query(
-        `INSERT INTO users (id, username, password_hash, name, email, role, is_admin, default_floor_id, gender)
-         VALUES ($1, lower($2), $3, $4, lower($5), $6, $7, $8, $9) RETURNING *`,
-        [input.id, input.username, input.passwordHash, input.name, input.email || null, input.role || 'Member', Boolean(input.isAdmin), floorId, input.gender || 'male'],
+        `INSERT INTO users (id, username, password_hash, name, email, role, is_admin, default_floor_id, gender, afk_enabled, afk_after_minutes, offline_after_minutes)
+         VALUES ($1, lower($2), $3, $4, lower($5), $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+        [input.id, input.username, input.passwordHash, input.name, input.email || null, input.role || 'Member', Boolean(input.isAdmin), floorId, input.gender || 'male', input.afkEnabled ?? true, input.afkAfterMinutes ?? 10, input.offlineAfterMinutes ?? 30],
       );
       await client.query('INSERT INTO presence_status (user_id) VALUES ($1)', [input.id]);
       await client.query(`INSERT INTO conversation_members (conversation_id,user_id)
@@ -195,6 +201,9 @@ class OfficeDatabase {
     gender?: 'male' | 'female';
     isAdmin?: boolean;
     canViewAnalytics?: boolean;
+    afkEnabled?: boolean;
+    afkAfterMinutes?: number;
+    offlineAfterMinutes?: number;
     isActive?: boolean;
     passwordHash?: string;
     defaultFloorId?: string;
@@ -209,10 +218,14 @@ class OfficeDatabase {
         password_hash = COALESCE($7, password_hash),
         default_floor_id = COALESCE($8, default_floor_id),
         gender = COALESCE($9, gender),
-        can_view_analytics = COALESCE($10, can_view_analytics)
+        can_view_analytics = COALESCE($10, can_view_analytics),
+        afk_enabled = COALESCE($11, afk_enabled),
+        afk_after_minutes = COALESCE($12, afk_after_minutes),
+        offline_after_minutes = COALESCE($13, offline_after_minutes)
        WHERE id = $1 RETURNING *`,
       [id, updates.name || null, updates.username || null, updates.role || null,
-        updates.isAdmin ?? null, updates.isActive ?? null, updates.passwordHash || null, updates.defaultFloorId || null, updates.gender || null, updates.canViewAnalytics ?? null],
+        updates.isAdmin ?? null, updates.isActive ?? null, updates.passwordHash || null, updates.defaultFloorId || null, updates.gender || null, updates.canViewAnalytics ?? null,
+        updates.afkEnabled ?? null, updates.afkAfterMinutes ?? null, updates.offlineAfterMinutes ?? null],
     );
     if (updates.defaultFloorId) await pool.query('UPDATE rooms SET floor_id=$2 WHERE owner_user_id=$1', [id, updates.defaultFloorId]);
     if (updates.isActive === false) await pool.query('DELETE FROM auth_sessions WHERE user_id = $1', [id]);

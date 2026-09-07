@@ -58,6 +58,9 @@ function safeUser(user: User): User {
     teamName: user.teamName,
     isAdmin: user.isAdmin,
     canViewAnalytics: user.canViewAnalytics,
+    afkEnabled: user.afkEnabled,
+    afkAfterMinutes: user.afkAfterMinutes,
+    offlineAfterMinutes: user.offlineAfterMinutes,
     isActive: user.isActive,
     createdAt: user.createdAt,
     officeIntroSeen: user.officeIntroSeen,
@@ -273,6 +276,9 @@ async function startServer() {
     const name = String(req.body?.name || '').trim();
     const role = String(req.body?.role || 'Member').trim();
     const gender = req.body?.gender === 'female' ? 'female' : 'male';
+    const afkEnabled = typeof req.body?.afkEnabled === 'boolean' ? req.body.afkEnabled : true;
+    const afkAfterMinutes = req.body?.afkAfterMinutes === undefined ? 10 : Number(req.body.afkAfterMinutes);
+    const offlineAfterMinutes = req.body?.offlineAfterMinutes === undefined ? 30 : Number(req.body.offlineAfterMinutes);
     const defaultFloorId = typeof req.body?.defaultFloorId === 'string' ? req.body.defaultFloorId : undefined;
     if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
       res.status(400).json({ error: 'Username must be 3–32 characters using letters, numbers, dots, dashes, or underscores.' });
@@ -286,13 +292,17 @@ async function startServer() {
       res.status(400).json({ error: 'Invalid name or role.' });
       return;
     }
+    if (!Number.isInteger(afkAfterMinutes) || afkAfterMinutes < 1 || afkAfterMinutes > 240 || !Number.isInteger(offlineAfterMinutes) || offlineAfterMinutes < 2 || offlineAfterMinutes > 480 || offlineAfterMinutes <= afkAfterMinutes) {
+      res.status(400).json({ error: 'AFK time must be 1–240 minutes and disconnect time must be later, up to 480 minutes.' });
+      return;
+    }
     if (defaultFloorId && !(await db.getFloors()).some((floor) => floor.id === defaultFloorId)) {
       res.status(400).json({ error: 'Select a valid default floor.' });
       return;
     }
     try {
       const user = await db.createUser({
-        id: crypto.randomUUID(), username, passwordHash: await hashPassword(password), name, role, defaultFloorId, gender,
+        id: crypto.randomUUID(), username, passwordHash: await hashPassword(password), name, role, defaultFloorId, gender, afkEnabled, afkAfterMinutes, offlineAfterMinutes,
       });
       io.emit('users:updated', await db.getUsers());
       io.emit('rooms:updated', await db.getRooms());
@@ -318,6 +328,9 @@ async function startServer() {
     const password = req.body?.password ? String(req.body.password) : undefined;
     const isAdmin = typeof req.body?.isAdmin === 'boolean' ? req.body.isAdmin : undefined;
     const canViewAnalytics = typeof req.body?.canViewAnalytics === 'boolean' ? req.body.canViewAnalytics : undefined;
+    const afkEnabled = typeof req.body?.afkEnabled === 'boolean' ? req.body.afkEnabled : undefined;
+    const afkAfterMinutes = req.body?.afkAfterMinutes === undefined ? undefined : Number(req.body.afkAfterMinutes);
+    const offlineAfterMinutes = req.body?.offlineAfterMinutes === undefined ? undefined : Number(req.body.offlineAfterMinutes);
     const isActive = typeof req.body?.isActive === 'boolean' ? req.body.isActive : undefined;
     const defaultFloorId = req.body?.defaultFloorId === undefined ? undefined : String(req.body.defaultFloorId);
     const gender = req.body?.gender === undefined ? undefined : String(req.body.gender) as 'male' | 'female';
@@ -360,9 +373,15 @@ async function startServer() {
       return;
     }
     if (gender !== undefined && !['male', 'female'].includes(gender)) { res.status(400).json({ error: 'Select a valid gender.' }); return; }
+    const nextAfkMinutes = afkAfterMinutes ?? target.afkAfterMinutes ?? 10;
+    const nextOfflineMinutes = offlineAfterMinutes ?? target.offlineAfterMinutes ?? 30;
+    if (!Number.isInteger(nextAfkMinutes) || nextAfkMinutes < 1 || nextAfkMinutes > 240 || !Number.isInteger(nextOfflineMinutes) || nextOfflineMinutes < 2 || nextOfflineMinutes > 480 || nextOfflineMinutes <= nextAfkMinutes) {
+      res.status(400).json({ error: 'AFK time must be 1–240 minutes and disconnect time must be later, up to 480 minutes.' });
+      return;
+    }
     try {
       const user = await db.adminUpdateUser(target.id, {
-        name, username, role, gender, isAdmin, canViewAnalytics, isActive,
+        name, username, role, gender, isAdmin, canViewAnalytics, afkEnabled, afkAfterMinutes, offlineAfterMinutes, isActive,
         passwordHash: password ? await hashPassword(password) : undefined, defaultFloorId,
       });
       io.emit('users:updated', await db.getUsers());

@@ -776,7 +776,7 @@ export default function App() {
       <ShelfWindow open={shelfWindowOpen} owner={(activeMediaRoom?.type === 'personal' && users.find((user) => user.id === activeMediaRoom.ownerUserId)) || currentUser} currentUser={currentUser} onClose={() => setShelfWindowOpen(false)} />
       <CalendarWindow open={calendarWindowOpen} onClose={() => setCalendarWindowOpen(false)} />
       <StoriesWindow open={storiesWindowOpen} currentUser={currentUser} onClose={() => setStoriesWindowOpen(false)} />
-      <InactivityMonitor onAfk={markAfk} onOffline={pauseForInactivity} onRestore={restoreFromInactivity} />
+      <InactivityMonitor enabled={currentUser.afkEnabled !== false} afkAfterMinutes={currentUser.afkAfterMinutes || 10} offlineAfterMinutes={currentUser.offlineAfterMinutes || 30} onAfk={markAfk} onOffline={pauseForInactivity} onRestore={restoreFromInactivity} />
     </div>
   );
 }

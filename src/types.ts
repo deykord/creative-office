@@ -13,6 +13,9 @@ export interface User {
   teamName?: string;
   isAdmin?: boolean;
   canViewAnalytics?: boolean;
+  afkEnabled?: boolean;
+  afkAfterMinutes?: number;
+  offlineAfterMinutes?: number;
   isActive?: boolean;
   officeIntroSeen?: boolean;
   personalRoomId?: string;
